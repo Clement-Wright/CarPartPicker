@@ -1,0 +1,309 @@
+[
+  {
+    "package_id": "daily_brake_refresh",
+    "title": "Daily Brake Refresh",
+    "subtitle": "Keep the stock wheel, sharpen the pedal, stay comfortable",
+    "description": "A low-drama daily package that upgrades pads, lines, and fluid without changing the wheel diameter.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.94,
+      "braking": 0.82,
+      "winter": 0.56,
+      "budget_grip": 0.52,
+      "street_performance": 0.48
+    },
+    "axes": {
+      "safety": 0.78,
+      "fun": 0.58,
+      "utility": 0.74,
+      "cost": 0.9,
+      "mod_potential": 0.62,
+      "winter": 0.52
+    },
+    "effect_tags": ["daily usability", "pedal confidence", "comfort"],
+    "price_band": {
+      "min": 520,
+      "max": 740
+    },
+    "part_ids": ["brake_daily_pad", "brake_ss_lines", "brake_fluid"],
+    "supporting_parts": ["Fresh bleed required"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 1,
+    "fitment_base": 0.98,
+    "safety_preservation": 0.92,
+    "tradeoff_notes": ["Less outright fade resistance than a full big brake kit."],
+    "what_changes": ["Sharper initial bite", "More consistent pedal feel"]
+  },
+  {
+    "package_id": "daily_brake_wheel_18",
+    "title": "Daily Brake + Wheel 18",
+    "subtitle": "Street brake confidence with a wheel that clears future upgrades",
+    "description": "A daily package that moves the car onto an 18-inch forged wheel and street tire, setting up future brake headroom.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.91,
+      "braking": 0.86,
+      "winter": 0.3,
+      "budget_grip": 0.55,
+      "street_performance": 0.77
+    },
+    "axes": {
+      "safety": 0.74,
+      "fun": 0.74,
+      "utility": 0.62,
+      "cost": 0.58,
+      "mod_potential": 0.85,
+      "winter": 0.26
+    },
+    "effect_tags": ["daily usability", "braking", "future clearance"],
+    "price_band": {
+      "min": 2380,
+      "max": 2620
+    },
+    "part_ids": ["wheel_18_forged", "tire_daily_18", "brake_daily_pad", "brake_fluid"],
+    "supporting_parts": ["TPMS swap", "Alignment check after wheel and tire install"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 2,
+    "fitment_base": 0.96,
+    "safety_preservation": 0.88,
+    "tradeoff_notes": ["Harsher impact response than a 17-inch daily package."],
+    "what_changes": ["Clearer brake upgrade path", "Higher dry-road grip"]
+  },
+  {
+    "package_id": "bbk_core_18_only",
+    "title": "Street BBK Core",
+    "subtitle": "Big brake kit for cars already on 18-inch clearance",
+    "description": "A front big brake package for trims or current setups that already have 18-inch wheel clearance.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.64,
+      "braking": 0.97,
+      "winter": 0.18,
+      "budget_grip": 0.24,
+      "street_performance": 0.88
+    },
+    "axes": {
+      "safety": 0.68,
+      "fun": 0.82,
+      "utility": 0.42,
+      "cost": 0.34,
+      "mod_potential": 0.92,
+      "winter": 0.18
+    },
+    "effect_tags": ["braking", "street performance"],
+    "price_band": {
+      "min": 2360,
+      "max": 2580
+    },
+    "part_ids": ["brake_bbk_street", "brake_fluid"],
+    "supporting_parts": ["Pad bedding", "Front-only bias review"],
+    "required_conditions": [
+      {
+        "kind": "min_effective_wheel_diameter",
+        "value": 18,
+        "message": "This brake kit needs 18-inch wheel clearance."
+      }
+    ],
+    "blocked_conditions": [],
+    "dependency_count": 2,
+    "fitment_base": 0.9,
+    "safety_preservation": 0.82,
+    "tradeoff_notes": ["Adds cost and complexity without solving winter traction."],
+    "what_changes": ["Higher heat capacity", "Much stronger repeated stops"]
+  },
+  {
+    "package_id": "winter_traction_17",
+    "title": "Winter Traction 17",
+    "subtitle": "17-inch wheel and winter tire setup for cold-weather daily use",
+    "description": "A dedicated winter package that preserves ride quality and keeps the car compliant in cold weather.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.84,
+      "braking": 0.42,
+      "winter": 0.98,
+      "budget_grip": 0.36,
+      "street_performance": 0.2
+    },
+    "axes": {
+      "safety": 0.86,
+      "fun": 0.44,
+      "utility": 0.78,
+      "cost": 0.72,
+      "mod_potential": 0.52,
+      "winter": 0.98
+    },
+    "effect_tags": ["winter", "daily usability", "comfort"],
+    "price_band": {
+      "min": 1640,
+      "max": 1820
+    },
+    "part_ids": ["wheel_17_flow", "tire_winter_17"],
+    "supporting_parts": ["Seasonal swap storage"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 1,
+    "fitment_base": 0.99,
+    "safety_preservation": 0.95,
+    "tradeoff_notes": ["Gives away warm-weather sharpness."],
+    "what_changes": ["Cold-weather grip", "Higher snow confidence"]
+  },
+  {
+    "package_id": "budget_grip_17",
+    "title": "Budget Grip 17",
+    "subtitle": "Affordable 17-inch wheel and 200TW tire package",
+    "description": "A value-first grip package with alignment support and a lightweight 17-inch wheel.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.56,
+      "braking": 0.48,
+      "winter": 0.06,
+      "budget_grip": 0.99,
+      "street_performance": 0.7
+    },
+    "axes": {
+      "safety": 0.54,
+      "fun": 0.88,
+      "utility": 0.46,
+      "cost": 0.82,
+      "mod_potential": 0.72,
+      "winter": 0.08
+    },
+    "effect_tags": ["grip", "budget performance"],
+    "price_band": {
+      "min": 1710,
+      "max": 1890
+    },
+    "part_ids": ["wheel_17_flow", "tire_grip_17", "alignment_camber_front"],
+    "supporting_parts": ["Frequent rotation recommended"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 2,
+    "fitment_base": 0.97,
+    "safety_preservation": 0.74,
+    "tradeoff_notes": ["Wet and cold-weather behavior gets worse than a daily tire."],
+    "what_changes": ["Higher front-end bite", "Cheaper entry into grip driving"]
+  },
+  {
+    "package_id": "street_performance_18",
+    "title": "Street Performance 18",
+    "subtitle": "18-inch wheel, street tire, and coilover package",
+    "description": "A sharper street package with more body control and faster responses at the cost of winter comfort.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.46,
+      "braking": 0.66,
+      "winter": 0.08,
+      "budget_grip": 0.52,
+      "street_performance": 0.98
+    },
+    "axes": {
+      "safety": 0.6,
+      "fun": 0.94,
+      "utility": 0.34,
+      "cost": 0.26,
+      "mod_potential": 0.96,
+      "winter": 0.08
+    },
+    "effect_tags": ["grip", "street performance", "suspension"],
+    "price_band": {
+      "min": 3850,
+      "max": 4230
+    },
+    "part_ids": ["wheel_18_forged", "tire_daily_18", "suspension_coilover", "alignment_camber_front"],
+    "supporting_parts": ["Ride-height setup", "Corner balance optional"],
+    "required_conditions": [],
+    "blocked_conditions": [
+      {
+        "kind": "winter_priority",
+        "message": "This package sacrifices winter compliance and ride comfort."
+      }
+    ],
+    "dependency_count": 3,
+    "fitment_base": 0.95,
+    "safety_preservation": 0.68,
+    "tradeoff_notes": ["Lowest comfort score in the catalog."],
+    "what_changes": ["Sharper transitions", "More front-end authority"]
+  },
+  {
+    "package_id": "comfort_daily_suspension",
+    "title": "Comfort Daily Suspension",
+    "subtitle": "Refresh the chassis without making the car harsh",
+    "description": "A mild suspension refresh for owners who want composure and compliance more than peak grip.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.88,
+      "braking": 0.32,
+      "winter": 0.62,
+      "budget_grip": 0.4,
+      "street_performance": 0.42
+    },
+    "axes": {
+      "safety": 0.8,
+      "fun": 0.52,
+      "utility": 0.82,
+      "cost": 0.54,
+      "mod_potential": 0.48,
+      "winter": 0.66
+    },
+    "effect_tags": ["comfort", "daily usability", "suspension"],
+    "price_band": {
+      "min": 1260,
+      "max": 1440
+    },
+    "part_ids": ["suspension_comfort"],
+    "supporting_parts": ["Alignment after install"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 1,
+    "fitment_base": 0.97,
+    "safety_preservation": 0.9,
+    "tradeoff_notes": ["Less dramatic than a coilover package for aggressive driving."],
+    "what_changes": ["Calmer secondary ride", "More stable daily body control"]
+  },
+  {
+    "package_id": "daily_wheel_keep_17",
+    "title": "Keep-It-17 Daily",
+    "subtitle": "Stay on a 17-inch package for compliance and tire cost control",
+    "description": "A wheel-and-tire daily package that intentionally keeps the car on a 17-inch footprint.",
+    "compatible_platforms": ["zn8", "zd8"],
+    "compatible_trim_ids": [],
+    "goal_biases": {
+      "daily": 0.9,
+      "braking": 0.46,
+      "winter": 0.68,
+      "budget_grip": 0.5,
+      "street_performance": 0.36
+    },
+    "axes": {
+      "safety": 0.8,
+      "fun": 0.62,
+      "utility": 0.8,
+      "cost": 0.76,
+      "mod_potential": 0.56,
+      "winter": 0.64
+    },
+    "effect_tags": ["daily usability", "comfort", "cost control"],
+    "price_band": {
+      "min": 1560,
+      "max": 1710
+    },
+    "part_ids": ["wheel_17_flow", "tire_daily_17"],
+    "supporting_parts": ["Use a 17-inch daily tire equivalent in production data"],
+    "required_conditions": [],
+    "blocked_conditions": [],
+    "dependency_count": 1,
+    "fitment_base": 0.84,
+    "safety_preservation": 0.84,
+    "tradeoff_notes": ["Less absolute brake clearance headroom than an 18-inch future-proof package."],
+    "what_changes": ["Lower replacement cost", "More compliant ride"]
+  }
+]

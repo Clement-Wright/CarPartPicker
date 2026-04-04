@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --panel-fill: rgba(15, 23, 30, 0.82);
+  --panel-muted: rgba(148, 163, 184, 0.14);
+  --ink-soft: #c6d2dc;
+  --ink-hard: #eff5fa;
+  --safety-orange: #ff7b31;
+  --safety-mint: #7ce7c6;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(255, 123, 49, 0.14), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(124, 231, 198, 0.12), transparent 24%),
+    #0d1318;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--ink-hard);
+  font-family: var(--font-plex), sans-serif;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
+}
+
+.panel {
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(29, 38, 46, 0.92), rgba(12, 18, 24, 0.94));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(20px);
+}
+
+.panel-muted {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chip {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chip-active {
+  border-color: rgba(255, 123, 49, 0.5);
+  background: rgba(255, 123, 49, 0.12);
+  color: #ffe2d3;
+}
+
+.metric-bar {
+  background: linear-gradient(90deg, rgba(255, 123, 49, 0.12), rgba(124, 231, 198, 0.18));
+}
+
+.react-flow__attribution {
+  display: none;
+}
+

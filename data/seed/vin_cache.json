@@ -1,0 +1,26 @@
+[
+  {
+    "vin": "JF1ZNAA10N9700001",
+    "trim_id": "gr86_2022_base",
+    "year": 2022,
+    "make": "Toyota",
+    "model": "GR86",
+    "trim": "Base"
+  },
+  {
+    "vin": "JF1ZDAD19P9700002",
+    "trim_id": "brz_2023_premium",
+    "year": 2023,
+    "make": "Subaru",
+    "model": "BRZ",
+    "trim": "Premium"
+  },
+  {
+    "vin": "JF1ZNBF18R9700003",
+    "trim_id": "gr86_2023_premium",
+    "year": 2023,
+    "make": "Toyota",
+    "model": "GR86",
+    "trim": "Premium"
+  }
+]
