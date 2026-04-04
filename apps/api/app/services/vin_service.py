@@ -5,10 +5,10 @@ import httpx
 
 from app.config import get_settings
 from app.schemas import DecodedVehicle
-from app.services.seed_repository import SeedRepository, get_repository
+from app.services.seed_repository import CatalogRepository, get_repository
 
 
-async def decode_vin(vin: str, repository: SeedRepository | None = None) -> DecodedVehicle:
+async def decode_vin(vin: str, repository: CatalogRepository | None = None) -> DecodedVehicle:
     repository = repository or get_repository()
     sanitized = vin.strip().upper()
     if len(sanitized) != 17:
@@ -53,4 +53,3 @@ async def decode_vin(vin: str, repository: SeedRepository | None = None) -> Deco
         source="vpic_live",
         cache_hit=False,
     )
-

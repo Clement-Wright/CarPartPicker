@@ -15,9 +15,9 @@ def list_trims() -> list[VehicleSummary]:
         VehicleSummary(
             trim_id=trim.trim_id,
             label=f"{trim.year} {trim.make} {trim.model} {trim.trim}",
-            stock_wheel_diameter=trim.stock_wheel_diameter,
             platform=trim.platform,
+            stock_wheel_diameter=trim.stock_wheel_diameter,
+            transmission=trim.transmission,
         )
         for trim in repository.list_trims()
     ]
-

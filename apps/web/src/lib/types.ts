@@ -1,46 +1,51 @@
+export type ValidationSeverity =
+  | "BLOCKER"
+  | "WARNING"
+  | "SCENARIO_PENALTY"
+  | "FABRICATION_REQUIRED"
+  | "UNKNOWN";
+
 export type VehicleSummary = {
   trim_id: string;
   label: string;
-  stock_wheel_diameter: number;
   platform: string;
+  stock_wheel_diameter: number;
+  transmission: string;
 };
 
-export type CurrentSetup = {
-  wheel_diameter?: number | null;
-  keep_current_wheels: boolean;
-  notes: string[];
-};
-
-export type ParsedBuildQuery = {
-  goals: string[];
-  budget_max?: number | null;
-  hard_constraints: string[];
-  current_setup?: CurrentSetup | null;
-  confidence: number;
-  extracted_terms: string[];
+export type VehicleTrim = {
+  trim_id: string;
+  platform: string;
+  year: number;
+  make: string;
+  model: string;
+  trim: string;
+  drivetrain: string;
+  transmission: string;
+  body_style: string;
+  stock_wheel_diameter: number;
+  stock_tire: string;
+  stock_hp: number;
+  stock_torque_lbft: number;
+  stock_weight_lb: number;
+  redline_rpm: number;
+  stock_zero_to_sixty_s: number;
+  stock_top_speed_mph: number;
+  stock_braking_distance_ft: number;
+  stock_lateral_grip_g: number;
+  stock_thermal_headroom: number;
+  stock_comfort_index: number;
+  safety_index: number;
+  recall_burden: number;
+  complaint_burden: number;
+  recall_summary: string;
+  complaint_summary: string;
+  utility_note: string;
+  mod_potential: number;
 };
 
 export type VehicleDetail = {
-  trim: {
-    trim_id: string;
-    platform: string;
-    year: number;
-    make: string;
-    model: string;
-    trim: string;
-    stock_wheel_diameter: number;
-    stock_tire: string;
-    safety_index: number;
-    recall_burden: number;
-    complaint_burden: number;
-    recall_summary: string;
-    complaint_summary: string;
-    utility_note: string;
-    mod_potential: number;
-    drivetrain: string;
-    transmission: string;
-    body_style: string;
-  };
+  trim: VehicleTrim;
   safety_context: {
     safety_index: number;
     recall_burden: number;
@@ -51,88 +56,349 @@ export type VehicleDetail = {
   };
 };
 
-export type ScoreBreakdown = {
-  goal_alignment: number;
-  fitment_confidence: number;
-  cost_efficiency: number;
-  safety_preservation: number;
-  dependency_simplicity: number;
-  conflict_penalty: number;
-};
-
-export type BuildRecommendation = {
-  package_id: string;
-  title: string;
-  subtitle: string;
-  description: string;
-  score: number;
-  score_breakdown: ScoreBreakdown;
-  matched_goals: string[];
-  required_changes: string[];
-  conflicts: string[];
-  cost_band: {
-    min: number;
-    max: number;
+export type EngineFamily = {
+  engine_family_id: string;
+  label: string;
+  architecture: {
+    architecture_id: string;
+    label: string;
+    layout: string;
+    cylinder_count: number;
+    head_type: string;
+    valves_per_cylinder: number;
+    valvetrain: string;
   };
-  effect_tags: string[];
-  compatibility_status: string;
-  fitment_confidence: number;
-  safety_context: VehicleDetail["safety_context"];
-  why_it_matched: string[];
-  explanation: string;
-  what_would_change: string[];
-  graph_id: string;
+  base_displacement_l: number;
+  base_weight_lb: number;
+  base_peak_hp: number;
+  base_peak_torque_lbft: number;
+  base_redline_rpm: number;
+  tags: string[];
 };
 
-export type GraphNode = {
-  id: string;
+export type PartCatalogItem = {
+  part_id: string;
+  subsystem: string;
   label: string;
-  kind: string;
-  status: "info" | "positive" | "warning" | "conflict";
+  brand: string;
+  notes: string;
+  cost_usd: number;
+  tags: string[];
+  geometry: {
+    wheel_diameter_in?: number | null;
+    wheel_width_in?: number | null;
+    tire_width_mm?: number | null;
+    brake_min_wheel_in?: number | null;
+    hood_clearance_needed_mm: number;
+    hood_clearance_gain_mm: number;
+    ride_height_drop_mm: number;
+    tire_rub_risk: number;
+  };
+  performance: {
+    hp_delta: number;
+    torque_delta: number;
+    weight_delta_lb: number;
+    cooling_delta: number;
+    braking_delta: number;
+    grip_delta: number;
+    drag_delta: number;
+    downforce_delta: number;
+    comfort_delta: number;
+    driveline_stress_delta: number;
+    thermal_delta: number;
+    redline_delta_rpm: number;
+  };
+};
+
+export type BuildPreset = {
+  preset_id: string;
+  title: string;
   description: string;
-  position: { x: number; y: number };
+  scenario_name: string;
+  tags: string[];
+  patch: Record<string, string>;
 };
 
-export type GraphEdge = {
-  id: string;
-  source: string;
-  target: string;
+export type BuildSelection = {
+  subsystem: string;
+  selected_part_id?: string | null;
+  selected_config_id?: string | null;
+  source: "stock" | "preset" | "manual";
+};
+
+export type ScenarioDefinition = {
+  scenario_name: string;
   label: string;
-  status: "info" | "positive" | "warning" | "conflict";
+  description: string;
+  weights: Record<string, number>;
+  gates: string[];
+  penalties: string[];
+  assumptions: string[];
+};
+
+export type EngineBuildSpec = {
+  config_id: string;
+  engine_family_id: string;
+  label: string;
+  cylinder_count: number;
+  layout: string;
+  bore_mm: number;
+  stroke_mm: number;
+  compression_ratio: number;
+  valve_train: {
+    label: string;
+    head_flow_stage: "stock" | "street" | "race";
+    valves_per_cylinder: number;
+    variable_valve_timing: boolean;
+  };
+  cam_profile: {
+    profile_id: string;
+    label: string;
+  };
+  induction: {
+    type: "na" | "turbo" | "supercharger";
+    boost_psi: number;
+    intercooler_required: boolean;
+  };
+  fuel: {
+    fuel_type: "91_octane" | "93_octane" | "e85";
+    injector_scale: "stock" | "upgrade" | "high_flow";
+    pump_scale: "stock" | "upgrade" | "high_flow";
+  };
+  exhaust: {
+    exhaust_style: "stock" | "catback" | "turbo_back" | "equal_length";
+  };
+  tune_bias: "comfort" | "balanced" | "aggressive";
+  rev_limit_rpm: number;
+  notes: string[];
+};
+
+export type DrivetrainConfig = {
+  config_id: string;
+  label: string;
+  transmission_mode: "manual" | "automatic";
+  gear_ratios: number[];
+  final_drive_ratio: number;
+  driveline_loss_factor: number;
+  differential_bias: "street_lsd" | "track_lsd" | "open" | "torsen";
+  shift_latency_ms: number;
+};
+
+export type BuildState = {
+  build_id: string;
+  vehicle: VehicleTrim;
+  base_config: {
+    config_id: string;
+    trim_id: string;
+    subsystem_slots: Array<{
+      subsystem: string;
+      label: string;
+      description: string;
+      stock_part_id?: string | null;
+      stock_config_id?: string | null;
+    }>;
+    stock_parts: Array<{
+      subsystem: string;
+      stock_part_id: string;
+    }>;
+    stock_configs: Array<{
+      subsystem: string;
+      stock_config_id: string;
+    }>;
+  };
+  active_scenario: string;
+  target_metrics: {
+    budget_max?: number | null;
+    hp_min?: number | null;
+    torque_min?: number | null;
+    weight_max_lb?: number | null;
+    redline_min_rpm?: number | null;
+  };
+  tolerances: {
+    allow_fabrication: boolean;
+    keep_street_legal: boolean;
+    protect_daily_comfort: boolean;
+  };
+  selections: BuildSelection[];
+  engine_build_spec: EngineBuildSpec;
+  drivetrain_config: DrivetrainConfig;
+  computation: {
+    build_hash: string;
+    revision: number;
+    updated_at: string;
+  };
+  active_notes: string[];
+};
+
+export type BuildDetailResponse = {
+  build: BuildState;
+  available_parts: Record<string, PartCatalogItem[]>;
+  available_presets: BuildPreset[];
+  scenario_definitions: ScenarioDefinition[];
+  engine_families: EngineFamily[];
+  import_batches: Array<{
+    import_batch_id: string;
+    source_system: string;
+    imported_at: string;
+    status: string;
+    record_count: number;
+    notes: string;
+  }>;
+};
+
+export type BuildValidationSnapshot = {
+  build_id: string;
+  build_hash: string;
+  phase: "fast" | "heavy";
+  summary: {
+    blockers: number;
+    warnings: number;
+    scenario_penalties: number;
+    fabrication_required: number;
+    unknown: number;
+  };
+  findings: Array<{
+    finding_id: string;
+    phase: "fast" | "heavy";
+    category: "interface" | "geometry" | "dependency" | "scenario";
+    severity: ValidationSeverity;
+    subsystem: string;
+    title: string;
+    detail: string;
+    blocking: boolean;
+    related_parts: string[];
+    related_configs: string[];
+  }>;
+  computed_at: string;
+};
+
+export type MetricSet = {
+  peak_hp: number;
+  peak_torque_lbft: number;
+  curb_weight_lb: number;
+  upgrade_cost_usd: number;
+  redline_rpm: number;
+  power_to_weight_hp_per_ton: number;
+  top_speed_mph: number;
+  zero_to_sixty_s: number;
+  quarter_mile_s: number;
+  braking_distance_ft: number;
+  lateral_grip_g: number;
+  thermal_headroom: number;
+  driveline_stress: number;
+  comfort_index: number;
+  fabrication_index: number;
+  budget_remaining_usd?: number | null;
+};
+
+export type BuildMetricSnapshot = {
+  build_id: string;
+  build_hash: string;
+  metrics: MetricSet;
+  computed_at: string;
+};
+
+export type VehicleMetricSnapshot = BuildMetricSnapshot;
+
+export type BuildDynoSnapshot = {
+  build_id: string;
+  build_hash: string;
+  engine_family_id: string;
+  spec_hash: string;
+  dyno: {
+    peak_hp: number;
+    peak_torque_lbft: number;
+    shift_rpm: number;
+    engine_curve: Array<{
+      rpm: number;
+      torque_lbft: number;
+      hp: number;
+    }>;
+    gear_curves: Array<{
+      gear: string;
+      points: Array<{
+        rpm: number;
+        speed_mph: number;
+        wheel_torque_lbft: number;
+      }>;
+    }>;
+  };
+  computed_at: string;
+};
+
+export type BuildScenarioSnapshot = {
+  build_id: string;
+  build_hash: string;
+  result: {
+    scenario_name: string;
+    score: number;
+    passing: boolean;
+    strengths: string[];
+    penalties: string[];
+    notes: string[];
+  };
+  computed_at: string;
+};
+
+export type RenderConfig = {
+  build_id: string;
+  build_hash: string;
+  ride_height_drop_mm: number;
+  paint_color: string;
+  scene_objects: Array<{
+    object_id: string;
+    slot: string;
+    kind: string;
+    color: string;
+    position: [number, number, number];
+    scale: [number, number, number];
+    rotation: [number, number, number];
+    visible: boolean;
+    highlight: "none" | "warning" | "error";
+  }>;
+  highlights: Array<{
+    zone: string;
+    severity: "warning" | "error";
+    message: string;
+  }>;
+  computed_at: string;
 };
 
 export type GraphResponse = {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+  build_id: string;
+  build_hash: string;
+  nodes: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    status: "info" | "positive" | "warning" | "conflict";
+    description: string;
+    position: { x: number; y: number };
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    label: string;
+    status: "info" | "positive" | "warning" | "conflict";
+  }>;
   highlights: string[];
-  eliminated_options: {
-    package_id: string;
-    title: string;
-    reason: string;
-  }[];
+  findings: string[];
 };
 
-export type CompareResponse = {
-  axes: string[];
-  package_summaries: {
-    package_id: string;
-    title: string;
-    subtitle: string;
-    axes: Record<string, number>;
-    cost_band: {
-      min: number;
-      max: number;
-    };
-    fitment_confidence: number;
-    effect_tags: string[];
-    tradeoffs: string[];
-  }[];
-  deltas: Record<string, Record<string, number>>;
-  explanation_facts: {
-    summary: string;
-    baseline: string;
-    challenger: string;
-  };
+export type BuildDiffResponse = {
+  build_id: string;
+  against: string;
+  slots: Array<{
+    subsystem: string;
+    stock_part_id?: string | null;
+    stock_config_id?: string | null;
+    baseline_part_id?: string | null;
+    baseline_config_id?: string | null;
+    current_part_id?: string | null;
+    current_config_id?: string | null;
+    changed: boolean;
+  }>;
 };
 
 export type DecodedVehicle = {
@@ -146,3 +412,32 @@ export type DecodedVehicle = {
   cache_hit: boolean;
 };
 
+export type TargetSpecResponse = {
+  parsed: {
+    text: string;
+    budget_max?: number | null;
+    target_metrics: {
+      hp_min?: number | null;
+      weight_max_lb?: number | null;
+      redline_min_rpm?: number | null;
+      budget_max?: number | null;
+    };
+    hard_constraints: Record<string, string[]>;
+    soft_similarity: {
+      reference_vehicle?: string | null;
+      attributes: string[];
+    };
+    use_cases: string[];
+    avoid: string[];
+    confidence: number;
+  };
+  candidates: Array<{
+    title: string;
+    trim_id: string;
+    preset_id?: string | null;
+    score: number;
+    why: string[];
+    estimated_metrics: MetricSet;
+    scenario_name: string;
+  }>;
+};
