@@ -1,13 +1,22 @@
-# Catapult 2026
+# CarPartPicker
 
-GR86/BRZ Build Graph Planner MVP.
+CarPartPicker is a personal build-planning project focused on the GR86/BRZ platform. It combines a cockpit-style web app with a FastAPI backend so I can configure builds, tune engine and drivetrain settings, validate compatibility, and compare tradeoffs in one place.
 
-## Workspace Layout
+## What It Does
 
-- `apps/web` - Next.js single-page cockpit UI
-- `apps/api` - FastAPI deterministic recommendation engine
-- `data/seed` - curated trims, parts, packages, and VIN cache
-- `docker-compose.yml` - local app + Postgres + Neo4j stack
+- Builds and compares GR86/BRZ configurations
+- Applies subsystem part changes and preset overlays
+- Supports engine-builder and drivetrain tuning inputs
+- Decodes VINs into supported trims
+- Surfaces validation, dyno, vehicle-metric, scenario, and graph views
+- Runs target-spec search from plain-language goals like budget, power, or usage
+
+## Repo Layout
+
+- `apps/web` - Next.js planner UI
+- `apps/api` - FastAPI backend and build logic
+- `data/seed` - seeded trims, parts, presets, and VIN cache
+- `docker-compose.yml` - local stack for web, API, worker, Postgres, and Neo4j
 
 ## Local Development
 
@@ -15,8 +24,10 @@ GR86/BRZ Build Graph Planner MVP.
 
 ```bash
 npm install
-npm run dev --workspace apps/web
+npm run dev:web
 ```
+
+The web app runs on `http://localhost:3000` and uses `http://localhost:8000/api` by default.
 
 ### API
 
@@ -27,15 +38,19 @@ pip install -r apps/api/requirements.txt
 uvicorn app.main:app --app-dir apps/api --reload
 ```
 
+The API runs on `http://localhost:8000`.
+
 ### Full Stack
 
 ```bash
 docker compose up --build
 ```
 
-## Demo Flows
+## Useful Commands
 
-- `2022 GR86 Base` daily brake + wheel upgrade under `$2,500`
-- `2023 BRZ Premium` winter build vs budget grip build
-- conflict explanation for a big brake kit that needs 18-inch clearance
-
+```bash
+npm run build:web
+npm run lint:web
+npm run test:web
+pytest apps/api/app/tests -q
+```
