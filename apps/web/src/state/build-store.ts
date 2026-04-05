@@ -7,18 +7,18 @@ type FreshnessState = {
   heavy: boolean;
 };
 
-type AssetReadiness = "idle" | "loading" | "ready";
+type SceneCoverage = "idle" | "loading" | "ready";
 
 type BuildStore = {
   dirtySlots: string[];
   pendingRecomputations: string[];
   validationFreshness: FreshnessState;
-  assetReadiness: AssetReadiness;
+  sceneCoverage: SceneCoverage;
   activeComparisonBaseline: string;
   setDirtySlots: (slots: string[]) => void;
   setPendingRecomputations: (pending: string[]) => void;
   setValidationFreshness: (freshness: FreshnessState) => void;
-  setAssetReadiness: (status: AssetReadiness) => void;
+  setSceneCoverage: (status: SceneCoverage) => void;
   setActiveComparisonBaseline: (baseline: string) => void;
 };
 
@@ -26,11 +26,11 @@ export const useBuildStore = create<BuildStore>((set) => ({
   dirtySlots: [],
   pendingRecomputations: [],
   validationFreshness: { fast: false, heavy: false },
-  assetReadiness: "idle",
+  sceneCoverage: "idle",
   activeComparisonBaseline: "stock",
   setDirtySlots: (dirtySlots) => set({ dirtySlots }),
   setPendingRecomputations: (pendingRecomputations) => set({ pendingRecomputations }),
   setValidationFreshness: (validationFreshness) => set({ validationFreshness }),
-  setAssetReadiness: (assetReadiness) => set({ assetReadiness }),
+  setSceneCoverage: (sceneCoverage) => set({ sceneCoverage }),
   setActiveComparisonBaseline: (activeComparisonBaseline) => set({ activeComparisonBaseline })
 }));

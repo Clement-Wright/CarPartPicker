@@ -1,20 +1,31 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from app.production_schemas import (
     AssemblyEdge,
     AssemblyNode,
     BuildAssemblyGraph,
     BuildSceneResponse,
     BuildValidationReport,
-    SceneAssetStatus,
+    OmittedSceneItem,
+    ProxyGeometry,
+    ReadinessNote,
+    SceneAnchor,
+    SceneDimensions,
+    SceneHighlight,
+    SceneItem,
+    SceneSummary,
+    SceneTransform,
     SimulationResponse,
     SubsystemFitmentOutcome,
+    VisualizationSummary,
 )
-from app.schemas import BuildState
-from app.services.build_helpers import selected_parts
+from app.schemas import BuildState, RenderSceneObject
+from app.services.build_helpers import active_engine_family, selected_parts
 from app.services.dyno_service import build_dyno_snapshot
 from app.services.metrics_service import build_metric_snapshot
-from app.services.production_mapper_service import seed_asset_readiness
+from app.services.production_mapper_service import VisualizationProfile, describe_part_visualization
 from app.services.render_config_service import build_render_config
 from app.services.scenario_service import build_scenario_snapshot
 from app.services.validation_service import build_validation_snapshot
@@ -94,6 +105,75 @@ def build_assembly_graph(build: BuildState) -> BuildAssemblyGraph:
     )
 
 
+def _engine_visualization(build: BuildState) -> VisualizationProfile:
+    engine_family = active_engine_family(build)
+    dimensions = SceneDimensions(
+        length_mm=engine_family.envelope.length_mm,
+        width_mm=engine_family.envelope.width_mm,
+        height_mm=engine_family.envelope.height_mm,
+    )
+    return VisualizationProfile(
+        mode="proxy_from_dimensions",
+        has_exact_mesh=False,
+        has_proxy_geometry=True,
+        has_dimensional_specs=True,
+        scene_renderable=True,
+        catalog_visible=True,
+        proxy_geometry=ProxyGeometry(
+            kind="box",
+            color="#7e8c97" if engine_family.engine_family_id == "fa24d_native" else "#ff7b31",
+            size_mm=(dimensions.length_mm, dimensions.height_mm, dimensions.width_mm),
+        ),
+        dimensions=dimensions,
+        mesh_url=None,
+        notes=[
+            ReadinessNote(
+                code="engine-proxy",
+                message=f"{engine_family.label} is rendered as a dimensional engine envelope until an exact mesh is attached.",
+            )
+        ],
+    )
+
+
+def _profile_for_subsystem(build: BuildState, subsystem: str) -> tuple[str | None, VisualizationProfile]:
+    if subsystem == "engine":
+        return build.engine_build_spec.config_id, _engine_visualization(build)
+
+    for selection in build.selections:
+        if selection.subsystem == subsystem and selection.selected_part_id is not None:
+            return selection.selected_part_id, describe_part_visualization(selected_parts(build)[subsystem])
+
+    return None, VisualizationProfile(
+        mode="unsupported",
+        has_exact_mesh=False,
+        has_proxy_geometry=False,
+        has_dimensional_specs=False,
+        scene_renderable=False,
+        catalog_visible=False,
+        proxy_geometry=None,
+        dimensions=SceneDimensions(),
+        mesh_url=None,
+        notes=[
+            ReadinessNote(
+                code="missing-selection",
+                message="No selection is active for this subsystem.",
+            )
+        ],
+    )
+
+
+def _build_visualization_summary(outcomes: list[SubsystemFitmentOutcome]) -> VisualizationSummary:
+    counts = Counter(item.visualization_mode for item in outcomes)
+    return VisualizationSummary(
+        exact_mesh_ready=counts["exact_mesh_ready"],
+        proxy_from_dimensions=counts["proxy_from_dimensions"],
+        catalog_only=counts["catalog_only"],
+        unsupported=counts["unsupported"],
+        renderable_count=sum(1 for item in outcomes if item.scene_renderable),
+        catalog_visible_count=sum(1 for item in outcomes if item.catalog_visible),
+    )
+
+
 def _subsystem_outcome(build: BuildState, subsystem: str, reasons: list[str], blocking: bool, fabrication: bool) -> SubsystemFitmentOutcome:
     if blocking:
         outcome = "invalid"
@@ -102,26 +182,16 @@ def _subsystem_outcome(build: BuildState, subsystem: str, reasons: list[str], bl
     else:
         outcome = "direct_fit"
 
-    selection_id = (
-        build.engine_build_spec.config_id
-        if subsystem == "engine"
-        else next(
-            (
-                selection.selected_part_id
-                for selection in build.selections
-                if selection.subsystem == subsystem and selection.selected_part_id is not None
-            ),
-            None,
-        )
-    )
-    label = build.engine_build_spec.label if subsystem == "engine" else selection_id or subsystem
-
+    selection_id, profile = _profile_for_subsystem(build, subsystem)
     return SubsystemFitmentOutcome(
         subsystem=subsystem,
         selection_id=selection_id,
         outcome=outcome,
-        asset_readiness=seed_asset_readiness(subsystem=subsystem, label=label),
+        visualization_mode=profile.mode,
+        scene_renderable=profile.scene_renderable,
+        catalog_visible=profile.catalog_visible,
         reasons=reasons,
+        support_notes=profile.notes,
     )
 
 
@@ -147,16 +217,15 @@ def build_validation_report(build: BuildState) -> BuildValidationReport:
         )
         for subsystem in subsystem_order
     ]
+    visualization_summary = _build_visualization_summary(subsystem_outcomes)
 
-    production_blockers = []
-    if validation.summary.blockers:
-        production_blockers.append("Compatibility blockers remain unresolved.")
-    production_blockers.extend(
-        f"Exact asset readiness is incomplete for {item.subsystem}."
-        for item in subsystem_outcomes
-        if item.asset_readiness.status != "approved_exact"
-    )
-    production_blockers.append("Catalog and pricing remain in seed mode.")
+    support_notes = [
+        "Visualization coverage does not change whether a part is mechanically valid, priced, or simulated.",
+    ]
+    if visualization_summary.catalog_only:
+        support_notes.append("Some selected parts are specs-only and will be omitted from the 3D scene while remaining fully active in the build.")
+    if visualization_summary.proxy_from_dimensions:
+        support_notes.append("Dimension-driven proxy geometry is active for selected major assemblies until exact meshes are available.")
 
     return BuildValidationReport(
         build_id=build.build_id,
@@ -165,31 +234,177 @@ def build_validation_report(build: BuildState) -> BuildValidationReport:
         assembly_graph=build_assembly_graph(build),
         validation=validation,
         subsystem_outcomes=subsystem_outcomes,
-        production_blockers=production_blockers,
+        visualization_summary=visualization_summary,
+        support_notes=support_notes,
     )
+
+
+def _transform_from_scene_object(item: RenderSceneObject) -> SceneTransform:
+    return SceneTransform(position=item.position, rotation=item.rotation, scale=item.scale)
+
+
+def _scene_item_from_object(
+    *,
+    part_id: str,
+    instance_id: str,
+    subsystem: str,
+    asset_mode: str,
+    proxy_geometry: ProxyGeometry | None,
+    dimensions: SceneDimensions,
+    scene_object: RenderSceneObject,
+) -> SceneItem:
+    return SceneItem(
+        part_id=part_id,
+        instance_id=instance_id,
+        subsystem=subsystem,
+        asset_mode=asset_mode,
+        proxy_geometry=proxy_geometry,
+        dimensions=dimensions,
+        transform=_transform_from_scene_object(scene_object),
+        anchor=SceneAnchor(slot=scene_object.slot, zone=subsystem),
+    )
+
+
+def _fallback_scene_object(part_id: str, subsystem: str, dimensions: SceneDimensions) -> RenderSceneObject:
+    return RenderSceneObject(
+        object_id=part_id,
+        slot=subsystem,
+        kind="proxy",
+        color="#9aa8b3",
+        position=(0.0, max(dimensions.height_mm / 2000, 0.12), 0.0),
+        scale=(1.0, 1.0, 1.0),
+        rotation=(0.0, 0.0, 0.0),
+        visible=True,
+    )
+
+
+def _wheel_corner_objects(render_config_objects: list[RenderSceneObject]) -> list[RenderSceneObject]:
+    return [item for item in render_config_objects if item.slot in {"front_left", "front_right", "rear_left", "rear_right"}]
+
+
+def _generate_tire_scene_objects(build: BuildState, wheel_objects: list[RenderSceneObject]) -> list[RenderSceneObject]:
+    tire_selection = next(
+        (selection for selection in build.selections if selection.subsystem == "tires" and selection.selected_part_id is not None),
+        None,
+    )
+    if tire_selection is None:
+        return []
+
+    if wheel_objects:
+        return [
+            RenderSceneObject(
+                object_id=f"{tire_selection.selected_part_id}-{wheel.slot}",
+                slot=wheel.slot,
+                kind="tire",
+                color="#15181c",
+                position=wheel.position,
+                scale=wheel.scale,
+                rotation=wheel.rotation,
+                visible=True,
+                highlight=wheel.highlight,
+            )
+            for wheel in wheel_objects
+        ]
+
+    return [
+        RenderSceneObject(
+            object_id=f"{tire_selection.selected_part_id}-{corner}",
+            slot=corner,
+            kind="tire",
+            color="#15181c",
+            position=position,
+            scale=(1.0, 1.0, 1.0),
+            rotation=(0.0, 0.0, 0.0),
+            visible=True,
+        )
+        for corner, position in (
+            ("front_left", (-0.82, -0.3, 1.05)),
+            ("front_right", (0.82, -0.3, 1.05)),
+            ("rear_left", (-0.82, -0.3, -1.05)),
+            ("rear_right", (0.82, -0.3, -1.05)),
+        )
+    ]
 
 
 def build_scene_response(build: BuildState) -> BuildSceneResponse:
     render_config = build_render_config(build)
     selected = selected_parts(build)
-    assets: list[SceneAssetStatus] = []
+    objects = list(render_config.scene_objects)
+    wheel_objects = _wheel_corner_objects(objects)
+    objects.extend(_generate_tire_scene_objects(build, wheel_objects))
+    objects_by_part: dict[str, list[RenderSceneObject]] = {}
 
-    for item in render_config.scene_objects:
-        subsystem = item.slot if item.slot in selected else "engine" if item.slot == "engine_bay" else item.slot
-        label = build.engine_build_spec.label if subsystem == "engine" else selected.get(subsystem).label if subsystem in selected else item.object_id
-        assets.append(
-            SceneAssetStatus(
-                subsystem=subsystem,
-                object_id=item.object_id,
-                asset_readiness=seed_asset_readiness(subsystem=subsystem, label=label),
+    for item in objects:
+        part_key = item.object_id.split("-front_")[0].split("-rear_")[0]
+        objects_by_part.setdefault(part_key, []).append(item)
+
+    items: list[SceneItem] = []
+    omitted_items: list[OmittedSceneItem] = []
+
+    for selection in build.selections:
+        if selection.selected_part_id is None:
+            continue
+        part = selected[selection.subsystem]
+        profile = describe_part_visualization(part)
+
+        if not profile.scene_renderable:
+            omitted_items.append(
+                OmittedSceneItem(
+                    part_id=part.part_id,
+                    subsystem=part.subsystem,
+                    asset_mode=profile.mode,
+                    hidden_reason=profile.notes[0].message,
+                )
+            )
+            continue
+
+        scene_objects = objects_by_part.get(part.part_id)
+        if not scene_objects and part.subsystem == "tires":
+            scene_objects = [item for item in objects if item.object_id.startswith(f"{part.part_id}-")]
+        if not scene_objects:
+            scene_objects = [_fallback_scene_object(part.part_id, part.subsystem, profile.dimensions)]
+
+        for scene_object in scene_objects:
+            items.append(
+                _scene_item_from_object(
+                    part_id=part.part_id,
+                    instance_id=scene_object.object_id,
+                    subsystem=part.subsystem,
+                    asset_mode=profile.mode,
+                    proxy_geometry=profile.proxy_geometry,
+                    dimensions=profile.dimensions,
+                    scene_object=scene_object,
+                )
+            )
+
+    engine_profile = _engine_visualization(build)
+    for scene_object in [item for item in render_config.scene_objects if item.slot in {"engine_bay", "intercooler"}]:
+        items.append(
+            _scene_item_from_object(
+                part_id=build.engine_build_spec.engine_family_id,
+                instance_id=scene_object.object_id,
+                subsystem="engine",
+                asset_mode=engine_profile.mode,
+                proxy_geometry=engine_profile.proxy_geometry,
+                dimensions=engine_profile.dimensions,
+                scene_object=scene_object,
             )
         )
+
+    summary = SceneSummary(
+        renderable_count=len(items),
+        exact_count=sum(1 for item in items if item.asset_mode == "exact_mesh_ready"),
+        proxy_count=sum(1 for item in items if item.asset_mode == "proxy_from_dimensions"),
+        omitted_count=len(omitted_items),
+    )
 
     return BuildSceneResponse(
         build_id=build.build_id,
         build_hash=build.computation.build_hash,
-        render_config=render_config,
-        assets=assets,
+        items=items,
+        omitted_items=omitted_items,
+        highlights=[SceneHighlight(zone=item.zone, severity=item.severity, message=item.message) for item in render_config.highlights],
+        summary=summary,
     )
 
 

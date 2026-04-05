@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 
 from fastapi import HTTPException
 
 from app.production_schemas import (
-    AssetReadiness,
     CatalogSourceContract,
     CatalogSourceContractsResponse,
     PartDetailV1,
@@ -13,37 +14,245 @@ from app.production_schemas import (
     PartSearchResponse,
     PartSummaryV1,
     PriceSnapshotView,
+    ProxyGeometry,
     ReadinessNote,
+    SceneDimensions,
     VehicleDetailV1,
     VehicleSearchItem,
     VehicleSearchResponse,
+    VisualizationMode,
 )
 from app.schemas import PartCatalogItem
 from app.services.seed_repository import CatalogRepository, get_repository
+
+
+CATALOG_ONLY_SUBSYSTEMS = {"tune", "fuel_system", "clutch", "differential"}
+PROXY_SUBSYSTEMS = {
+    "body_aero",
+    "forced_induction",
+    "intake",
+    "exhaust",
+    "cooling",
+    "transmission",
+    "suspension",
+    "brakes",
+    "wheels",
+    "tires",
+}
+
+
+@dataclass(frozen=True)
+class VisualizationProfile:
+    mode: VisualizationMode
+    has_exact_mesh: bool
+    has_proxy_geometry: bool
+    has_dimensional_specs: bool
+    scene_renderable: bool
+    catalog_visible: bool
+    proxy_geometry: ProxyGeometry | None
+    dimensions: SceneDimensions
+    mesh_url: str | None
+    notes: list[ReadinessNote]
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def seed_asset_readiness(*, subsystem: str, label: str) -> AssetReadiness:
-    return AssetReadiness(
-        status="seed_proxy_only",
+def _inch_to_mm(value: float | None) -> float | None:
+    return None if value is None else value * 25.4
+
+
+def _infer_part_diameter_mm(part: PartCatalogItem) -> float | None:
+    direct = _inch_to_mm(part.geometry.wheel_diameter_in)
+    if direct is not None:
+        return direct
+
+    label_match = re.search(r"(\d{2})-inch", part.label.lower())
+    if label_match:
+        return float(label_match.group(1)) * 25.4
+
+    kind_match = re.search(r"(\d{2})", part.visual.kind.lower())
+    if kind_match:
+        return float(kind_match.group(1)) * 25.4
+
+    return None
+
+
+def _proxy_dimensions(part: PartCatalogItem) -> SceneDimensions:
+    subsystem = part.subsystem
+    if subsystem == "wheels":
+        diameter_mm = _infer_part_diameter_mm(part) or 431.8
+        width_mm = _inch_to_mm(part.geometry.wheel_width_in) or 203.2
+        return SceneDimensions(length_mm=diameter_mm, width_mm=width_mm, height_mm=diameter_mm)
+    if subsystem == "tires":
+        width_mm = part.geometry.tire_width_mm or 225.0
+        diameter_mm = (_infer_part_diameter_mm(part) or 431.8) + (width_mm * 0.36)
+        return SceneDimensions(length_mm=diameter_mm, width_mm=width_mm, height_mm=diameter_mm)
+    if subsystem == "brakes":
+        diameter_mm = max(300.0, (part.geometry.brake_min_wheel_in or 17.0) * 19.0)
+        return SceneDimensions(length_mm=diameter_mm, width_mm=32.0, height_mm=diameter_mm)
+    if subsystem == "cooling":
+        return SceneDimensions(length_mm=720.0, width_mm=80.0, height_mm=180.0)
+    if subsystem == "body_aero":
+        return SceneDimensions(length_mm=1600.0, width_mm=80.0, height_mm=140.0)
+    if subsystem == "forced_induction":
+        return SceneDimensions(length_mm=360.0, width_mm=360.0, height_mm=340.0)
+    if subsystem == "intake":
+        return SceneDimensions(length_mm=420.0, width_mm=180.0, height_mm=160.0)
+    if subsystem == "exhaust":
+        return SceneDimensions(length_mm=1200.0, width_mm=140.0, height_mm=140.0)
+    if subsystem == "transmission":
+        return SceneDimensions(length_mm=720.0, width_mm=420.0, height_mm=400.0)
+    if subsystem == "suspension":
+        return SceneDimensions(length_mm=520.0, width_mm=180.0, height_mm=140.0)
+    return SceneDimensions()
+
+
+def _has_dimensional_specs(part: PartCatalogItem, dimensions: SceneDimensions) -> bool:
+    if any(value > 0 for value in (dimensions.length_mm, dimensions.width_mm, dimensions.height_mm)):
+        return True
+    geometry = part.geometry
+    return any(
+        value is not None and value > 0
+        for value in (
+            geometry.wheel_diameter_in,
+            geometry.wheel_width_in,
+            geometry.tire_width_mm,
+            geometry.brake_min_wheel_in,
+            geometry.hood_clearance_needed_mm,
+            geometry.hood_clearance_gain_mm,
+            geometry.ride_height_drop_mm,
+            geometry.thermal_load,
+        )
+    )
+
+
+def _proxy_geometry(part: PartCatalogItem, dimensions: SceneDimensions) -> ProxyGeometry | None:
+    if part.subsystem == "wheels":
+        return ProxyGeometry(
+            kind="cylinder",
+            color=part.visual.color,
+            radius_mm=max(dimensions.length_mm, dimensions.height_mm) / 2,
+            width_mm=dimensions.width_mm,
+        )
+    if part.subsystem == "tires":
+        return ProxyGeometry(
+            kind="cylinder",
+            color=part.visual.color,
+            radius_mm=max(dimensions.length_mm, dimensions.height_mm) / 2,
+            width_mm=dimensions.width_mm,
+        )
+    if part.subsystem == "brakes":
+        return ProxyGeometry(
+            kind="disc",
+            color=part.visual.color,
+            radius_mm=max(dimensions.length_mm, dimensions.height_mm) / 2,
+            thickness_mm=dimensions.width_mm,
+        )
+    if part.subsystem == "exhaust":
+        return ProxyGeometry(
+            kind="cylinder",
+            color=part.visual.color,
+            radius_mm=max(dimensions.width_mm, dimensions.height_mm) / 2,
+            length_mm=dimensions.length_mm,
+        )
+    if any(value > 0 for value in (dimensions.length_mm, dimensions.width_mm, dimensions.height_mm)):
+        return ProxyGeometry(
+            kind="box",
+            color=part.visual.color,
+            size_mm=(dimensions.length_mm, dimensions.height_mm, dimensions.width_mm),
+        )
+    return None
+
+
+def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
+    dimensions = _proxy_dimensions(part)
+    has_dimensional_specs = _has_dimensional_specs(part, dimensions)
+    proxy_geometry = _proxy_geometry(part, dimensions)
+
+    if part.subsystem in CATALOG_ONLY_SUBSYSTEMS:
+        return VisualizationProfile(
+            mode="catalog_only",
+            has_exact_mesh=False,
+            has_proxy_geometry=False,
+            has_dimensional_specs=has_dimensional_specs,
+            scene_renderable=False,
+            catalog_visible=True,
+            proxy_geometry=None,
+            dimensions=dimensions,
+            mesh_url=None,
+            notes=[
+                ReadinessNote(
+                    code="catalog-only-supported",
+                    message=f"{part.label} remains fully usable in the catalog, compatibility engine, build list, pricing, and simulation layers.",
+                ),
+                ReadinessNote(
+                    code="scene-omitted",
+                    message="This part is intentionally omitted from the 3D scene because exact placement data is not necessary or not yet available.",
+                ),
+            ],
+        )
+
+    if part.subsystem in PROXY_SUBSYSTEMS and has_dimensional_specs and proxy_geometry is not None:
+        return VisualizationProfile(
+            mode="proxy_from_dimensions",
+            has_exact_mesh=False,
+            has_proxy_geometry=True,
+            has_dimensional_specs=True,
+            scene_renderable=True,
+            catalog_visible=True,
+            proxy_geometry=proxy_geometry,
+            dimensions=dimensions,
+            mesh_url=None,
+            notes=[
+                ReadinessNote(
+                    code="proxy-from-dimensions",
+                    message=f"{part.label} renders as a dimension-driven proxy until an exact public or licensed mesh is available.",
+                )
+            ],
+        )
+
+    if has_dimensional_specs and proxy_geometry is not None:
+        return VisualizationProfile(
+            mode="proxy_from_dimensions",
+            has_exact_mesh=False,
+            has_proxy_geometry=True,
+            has_dimensional_specs=True,
+            scene_renderable=True,
+            catalog_visible=True,
+            proxy_geometry=proxy_geometry,
+            dimensions=dimensions,
+            mesh_url=None,
+            notes=[
+                ReadinessNote(
+                    code="proxy-fallback",
+                    message=f"{part.label} is renderable through a simplified dimensional proxy.",
+                )
+            ],
+        )
+
+    return VisualizationProfile(
+        mode="unsupported",
+        has_exact_mesh=False,
+        has_proxy_geometry=False,
+        has_dimensional_specs=has_dimensional_specs,
+        scene_renderable=False,
+        catalog_visible=False,
+        proxy_geometry=None,
+        dimensions=dimensions,
+        mesh_url=None,
         notes=[
             ReadinessNote(
-                code="seed-proxy-only",
-                message=f"{label} currently renders through seed-mode proxy geometry for the {subsystem} subsystem.",
-            ),
-            ReadinessNote(
-                code="exact-asset-required",
-                message="Production readiness requires an approved exact mesh, anchors, collision proxy, materials, and QA metadata.",
-            ),
+                code="unsupported-data-gap",
+                message="This record is held back because it lacks enough trusted visualization or spec metadata for user-facing support.",
+            )
         ],
     )
 
 
 def map_part_summary(part: PartCatalogItem) -> PartSummaryV1:
-    asset_readiness = seed_asset_readiness(subsystem=part.subsystem, label=part.label)
+    visualization = describe_part_visualization(part)
     return PartSummaryV1(
         part_id=part.part_id,
         subsystem=part.subsystem,
@@ -52,8 +261,16 @@ def map_part_summary(part: PartCatalogItem) -> PartSummaryV1:
         notes=part.notes,
         tags=part.tags,
         cost_usd=part.cost_usd,
-        asset_readiness=asset_readiness,
-        production_ready=asset_readiness.status == "approved_exact",
+        production_ready=part.lineage.verification_status == "verified",
+        visualization_mode=visualization.mode,
+        has_exact_mesh=visualization.has_exact_mesh,
+        has_proxy_geometry=visualization.has_proxy_geometry,
+        has_dimensional_specs=visualization.has_dimensional_specs,
+        scene_renderable=visualization.scene_renderable,
+        catalog_visible=visualization.catalog_visible,
+        geometry=part.geometry.model_dump(),
+        performance=part.performance.model_dump(),
+        visualization_notes=visualization.notes,
     )
 
 
@@ -64,8 +281,6 @@ def map_part_detail(part: PartCatalogItem) -> PartDetailV1:
         compatible_platforms=part.compatible_platforms,
         compatible_transmissions=list(part.compatible_transmissions),
         interface=part.interface.model_dump(),
-        geometry=part.geometry.model_dump(),
-        performance=part.performance.model_dump(),
         capabilities=part.capabilities,
         dependency_rules=[rule.model_dump() for rule in part.dependency_rules],
         visual=part.visual.model_dump(),
@@ -77,10 +292,25 @@ def list_parts_v1(
     query: str | None = None,
     subsystem: str | None = None,
     tag: str | None = None,
+    vehicle_id: str | None = None,
+    renderable_only: bool = False,
     repository: CatalogRepository | None = None,
 ) -> PartSearchResponse:
     repository = repository or get_repository()
     items = repository.list_parts()
+
+    if vehicle_id:
+        try:
+            vehicle = repository.get_trim(vehicle_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown vehicle.") from exc
+        items = [
+            item
+            for item in items
+            if vehicle.platform in item.compatible_platforms
+            and (vehicle.transmission in item.compatible_transmissions or "any" in item.compatible_transmissions)
+        ]
+
     if query:
         query_lower = query.lower()
         items = [
@@ -97,6 +327,9 @@ def list_parts_v1(
         items = [item for item in items if tag in item.tags]
 
     mapped = [map_part_summary(item) for item in sorted(items, key=lambda part: (part.subsystem, part.cost_usd, part.label))]
+    mapped = [item for item in mapped if item.catalog_visible]
+    if renderable_only:
+        mapped = [item for item in mapped if item.scene_renderable]
     return PartSearchResponse(items=mapped, total=len(mapped))
 
 
@@ -106,7 +339,10 @@ def get_part_v1(part_id: str, repository: CatalogRepository | None = None) -> Pa
         part = repository.get_part(part_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown part.") from exc
-    return map_part_detail(part)
+    detail = map_part_detail(part)
+    if not detail.catalog_visible:
+        raise HTTPException(status_code=404, detail="Unknown part.")
+    return detail
 
 
 def get_part_prices_v1(part_id: str, repository: CatalogRepository | None = None) -> PartPricesResponse:

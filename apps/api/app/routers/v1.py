@@ -47,8 +47,16 @@ def part_search_endpoint(
     q: str | None = None,
     subsystem: str | None = None,
     tag: str | None = None,
+    vehicle_id: str | None = None,
+    renderable_only: bool = False,
 ) -> PartSearchResponse:
-    return list_parts_v1(query=q, subsystem=subsystem, tag=tag)
+    return list_parts_v1(
+        query=q,
+        subsystem=subsystem,
+        tag=tag,
+        vehicle_id=vehicle_id,
+        renderable_only=renderable_only,
+    )
 
 
 @router.get("/parts/{part_id}/prices", response_model=PartPricesResponse)

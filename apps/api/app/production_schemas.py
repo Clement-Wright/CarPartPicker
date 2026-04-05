@@ -10,7 +10,6 @@ from app.schemas import (
     PatchDrivetrainRequest,
     PatchEngineRequest,
     QueryTolerance,
-    RenderConfig,
     StrictModel,
     TargetMetrics,
     VehicleTrim,
@@ -18,7 +17,9 @@ from app.schemas import (
 
 
 CatalogDataMode = Literal["seed", "licensed", "verified"]
-AssetReadinessStatus = Literal["approved_exact", "seed_proxy_only", "missing_exact_asset", "qa_blocked"]
+VisualizationMode = Literal["exact_mesh_ready", "proxy_from_dimensions", "catalog_only", "unsupported"]
+RenderableAssetMode = Literal["exact_mesh_ready", "proxy_from_dimensions"]
+OmittedAssetMode = Literal["catalog_only", "unsupported"]
 FitmentStatus = Literal["direct_fit", "fits_with_adapter", "fits_with_fabrication", "simulation_only", "invalid"]
 SimulationMode = Literal["engine", "vehicle", "thermal", "braking", "handling"]
 
@@ -28,14 +29,46 @@ class ReadinessNote(StrictModel):
     message: str
 
 
-class AssetReadiness(StrictModel):
-    status: AssetReadinessStatus
-    exact_mesh_approved: bool = False
-    materials_approved: bool = False
-    anchors_complete: bool = False
-    collision_proxy_complete: bool = False
-    qa_complete: bool = False
-    notes: list[ReadinessNote] = Field(default_factory=list)
+class ProxyGeometry(StrictModel):
+    kind: Literal["box", "cylinder", "disc"]
+    color: str = "#9aa8b3"
+    size_mm: tuple[float, float, float] | None = None
+    radius_mm: float | None = None
+    width_mm: float | None = None
+    thickness_mm: float | None = None
+    length_mm: float | None = None
+
+
+class SceneDimensions(StrictModel):
+    length_mm: float = 0.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
+
+
+class SceneTransform(StrictModel):
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+
+class SceneAnchor(StrictModel):
+    slot: str
+    zone: str | None = None
+
+
+class SceneHighlight(StrictModel):
+    zone: str
+    severity: Literal["warning", "error"]
+    message: str
+
+
+class VisualizationSummary(StrictModel):
+    exact_mesh_ready: int = 0
+    proxy_from_dimensions: int = 0
+    catalog_only: int = 0
+    unsupported: int = 0
+    renderable_count: int = 0
+    catalog_visible_count: int = 0
 
 
 class PriceSnapshotView(StrictModel):
@@ -58,15 +91,21 @@ class PartSummaryV1(StrictModel):
     cost_usd: int
     source_mode: CatalogDataMode = "seed"
     production_ready: bool = False
-    asset_readiness: AssetReadiness
+    visualization_mode: VisualizationMode
+    has_exact_mesh: bool = False
+    has_proxy_geometry: bool = False
+    has_dimensional_specs: bool = False
+    scene_renderable: bool = False
+    catalog_visible: bool = True
+    geometry: dict[str, Any] = Field(default_factory=dict)
+    performance: dict[str, Any] = Field(default_factory=dict)
+    visualization_notes: list[ReadinessNote] = Field(default_factory=list)
 
 
 class PartDetailV1(PartSummaryV1):
     compatible_platforms: list[str] = Field(default_factory=list)
     compatible_transmissions: list[str] = Field(default_factory=list)
     interface: dict[str, Any] = Field(default_factory=dict)
-    geometry: dict[str, Any] = Field(default_factory=dict)
-    performance: dict[str, Any] = Field(default_factory=dict)
     capabilities: dict[str, float] = Field(default_factory=dict)
     dependency_rules: list[dict[str, Any]] = Field(default_factory=list)
     visual: dict[str, Any] = Field(default_factory=dict)
@@ -144,8 +183,11 @@ class SubsystemFitmentOutcome(StrictModel):
     selection_id: str | None = None
     outcome: FitmentStatus
     source_mode: CatalogDataMode = "seed"
-    asset_readiness: AssetReadiness
+    visualization_mode: VisualizationMode
+    scene_renderable: bool = False
+    catalog_visible: bool = True
     reasons: list[str] = Field(default_factory=list)
+    support_notes: list[ReadinessNote] = Field(default_factory=list)
 
 
 class BuildValidationReport(StrictModel):
@@ -156,21 +198,45 @@ class BuildValidationReport(StrictModel):
     assembly_graph: BuildAssemblyGraph
     validation: BuildValidationSnapshot
     subsystem_outcomes: list[SubsystemFitmentOutcome]
-    production_blockers: list[str] = Field(default_factory=list)
+    visualization_summary: VisualizationSummary = Field(default_factory=VisualizationSummary)
+    support_notes: list[str] = Field(default_factory=list)
 
 
-class SceneAssetStatus(StrictModel):
+class SceneItem(StrictModel):
+    part_id: str
+    instance_id: str
     subsystem: str
-    object_id: str
-    asset_readiness: AssetReadiness
+    asset_mode: RenderableAssetMode
+    mesh_url: str | None = None
+    proxy_geometry: ProxyGeometry | None = None
+    dimensions: SceneDimensions = Field(default_factory=SceneDimensions)
+    transform: SceneTransform = Field(default_factory=SceneTransform)
+    anchor: SceneAnchor
+    hidden_reason: str | None = None
+
+
+class OmittedSceneItem(StrictModel):
+    part_id: str
+    subsystem: str
+    asset_mode: OmittedAssetMode
+    hidden_reason: str
+
+
+class SceneSummary(StrictModel):
+    renderable_count: int = 0
+    exact_count: int = 0
+    proxy_count: int = 0
+    omitted_count: int = 0
 
 
 class BuildSceneResponse(StrictModel):
     build_id: str
     build_hash: str
     source_mode: CatalogDataMode = "seed"
-    render_config: RenderConfig
-    assets: list[SceneAssetStatus]
+    items: list[SceneItem] = Field(default_factory=list)
+    omitted_items: list[OmittedSceneItem] = Field(default_factory=list)
+    highlights: list[SceneHighlight] = Field(default_factory=list)
+    summary: SceneSummary = Field(default_factory=SceneSummary)
 
 
 class SimulationResponse(StrictModel):

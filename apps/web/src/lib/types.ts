@@ -5,6 +5,227 @@ export type ValidationSeverity =
   | "FABRICATION_REQUIRED"
   | "UNKNOWN";
 
+export type VisualizationMode =
+  | "exact_mesh_ready"
+  | "proxy_from_dimensions"
+  | "catalog_only"
+  | "unsupported";
+
+export type V1ReadinessNote = {
+  code: string;
+  message: string;
+};
+
+export type V1ProxyGeometry = {
+  kind: "box" | "cylinder" | "disc";
+  color: string;
+  size_mm?: [number, number, number] | null;
+  radius_mm?: number | null;
+  width_mm?: number | null;
+  thickness_mm?: number | null;
+  length_mm?: number | null;
+};
+
+export type V1SceneDimensions = {
+  length_mm: number;
+  width_mm: number;
+  height_mm: number;
+};
+
+export type V1SceneTransform = {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+};
+
+export type V1SceneAnchor = {
+  slot: string;
+  zone?: string | null;
+};
+
+export type V1SceneHighlight = {
+  zone: string;
+  severity: "warning" | "error";
+  message: string;
+};
+
+export type V1VisualizationSummary = {
+  exact_mesh_ready: number;
+  proxy_from_dimensions: number;
+  catalog_only: number;
+  unsupported: number;
+  renderable_count: number;
+  catalog_visible_count: number;
+};
+
+export type V1VehicleSearchItem = {
+  trim_id: string;
+  label: string;
+  platform: string;
+  transmission: string;
+  body_style: string;
+  source_mode: "seed" | "licensed" | "verified";
+  supported_domains: string[];
+};
+
+export type V1VehicleSearchResponse = {
+  items: V1VehicleSearchItem[];
+  total: number;
+  source_mode: "seed" | "licensed" | "verified";
+};
+
+export type V1VehicleDetail = {
+  vehicle: VehicleTrim;
+  source_mode: "seed" | "licensed" | "verified";
+  production_ready: boolean;
+  supported_domains: string[];
+  readiness_notes: V1ReadinessNote[];
+};
+
+export type V1PartSummary = {
+  part_id: string;
+  subsystem: string;
+  label: string;
+  brand: string;
+  notes: string;
+  tags: string[];
+  cost_usd: number;
+  source_mode: "seed" | "licensed" | "verified";
+  production_ready: boolean;
+  visualization_mode: VisualizationMode;
+  has_exact_mesh: boolean;
+  has_proxy_geometry: boolean;
+  has_dimensional_specs: boolean;
+  scene_renderable: boolean;
+  catalog_visible: boolean;
+  geometry: Record<string, number | string | boolean | null>;
+  performance: Record<string, number | string | boolean | null>;
+  visualization_notes: V1ReadinessNote[];
+};
+
+export type V1PartDetail = V1PartSummary & {
+  compatible_platforms: string[];
+  compatible_transmissions: string[];
+  interface: Record<string, number | string | boolean | null>;
+  capabilities: Record<string, number>;
+  dependency_rules: Array<Record<string, unknown>>;
+  visual: Record<string, unknown>;
+};
+
+export type V1PartSearchResponse = {
+  items: V1PartSummary[];
+  total: number;
+  source_mode: "seed" | "licensed" | "verified";
+};
+
+export type V1PartPricesResponse = {
+  part_id: string;
+  snapshots: Array<{
+    source: string;
+    source_mode: "seed" | "licensed" | "verified";
+    price_usd: number;
+    currency: string;
+    availability: string;
+    product_url?: string | null;
+    observed_at: string;
+  }>;
+};
+
+export type V1SubsystemFitmentOutcome = {
+  subsystem: string;
+  selection_id?: string | null;
+  outcome:
+    | "direct_fit"
+    | "fits_with_adapter"
+    | "fits_with_fabrication"
+    | "simulation_only"
+    | "invalid";
+  source_mode: "seed" | "licensed" | "verified";
+  visualization_mode: VisualizationMode;
+  scene_renderable: boolean;
+  catalog_visible: boolean;
+  reasons: string[];
+  support_notes: V1ReadinessNote[];
+};
+
+export type V1BuildValidationReport = {
+  build_id: string;
+  build_hash: string;
+  source_mode: "seed" | "licensed" | "verified";
+  build: BuildState;
+  assembly_graph: {
+    build_id: string;
+    build_hash: string;
+    nodes: Array<{
+      node_id: string;
+      kind: "vehicle" | "scenario" | "engine" | "part";
+      subsystem: string;
+      label: string;
+      selection_id?: string | null;
+    }>;
+    edges: Array<{
+      edge_id: string;
+      source: string;
+      target: string;
+      relation: string;
+      status:
+        | "direct_fit"
+        | "fits_with_adapter"
+        | "fits_with_fabrication"
+        | "simulation_only"
+        | "invalid";
+    }>;
+  };
+  validation: BuildValidationSnapshot;
+  subsystem_outcomes: V1SubsystemFitmentOutcome[];
+  visualization_summary: V1VisualizationSummary;
+  support_notes: string[];
+};
+
+export type V1SceneItem = {
+  part_id: string;
+  instance_id: string;
+  subsystem: string;
+  asset_mode: "exact_mesh_ready" | "proxy_from_dimensions";
+  mesh_url?: string | null;
+  proxy_geometry?: V1ProxyGeometry | null;
+  dimensions: V1SceneDimensions;
+  transform: V1SceneTransform;
+  anchor: V1SceneAnchor;
+  hidden_reason?: string | null;
+};
+
+export type V1OmittedSceneItem = {
+  part_id: string;
+  subsystem: string;
+  asset_mode: "catalog_only" | "unsupported";
+  hidden_reason: string;
+};
+
+export type V1BuildSceneResponse = {
+  build_id: string;
+  build_hash: string;
+  source_mode: "seed" | "licensed" | "verified";
+  items: V1SceneItem[];
+  omitted_items: V1OmittedSceneItem[];
+  highlights: V1SceneHighlight[];
+  summary: {
+    renderable_count: number;
+    exact_count: number;
+    proxy_count: number;
+    omitted_count: number;
+  };
+};
+
+export type V1SimulationResponse = {
+  build_id: string;
+  build_hash: string;
+  mode: "engine" | "vehicle" | "thermal" | "braking" | "handling";
+  source_mode: "seed" | "licensed" | "verified";
+  calibration_state: "seed_heuristic" | "calibration_required" | "calibrated";
+  payload: Record<string, unknown>;
+};
+
 export type VehicleSummary = {
   trim_id: string;
   label: string;
