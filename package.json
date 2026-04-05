@@ -1,5 +1,5 @@
 {
-  "name": "catapult-2026",
+  "name": "carpartpicker",
   "private": true,
   "workspaces": [
     "apps/web"

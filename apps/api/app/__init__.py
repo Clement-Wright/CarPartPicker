@@ -1,2 +1,2 @@
-"""Catapult API package."""
+"""CarPartPicker API package."""
 

@@ -1,5 +1,5 @@
 {
-  "name": "catapult-web",
+  "name": "carpartpicker-web",
   "private": true,
   "scripts": {
     "dev": "next dev",

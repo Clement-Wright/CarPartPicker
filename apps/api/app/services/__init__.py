@@ -1,2 +1,2 @@
-"""Service layer for seed-backed Catapult API."""
+"""Service layer for the seed-backed CarPartPicker API."""
 

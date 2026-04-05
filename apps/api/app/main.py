@@ -4,15 +4,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import builds, catalog, catalog_import, search, vehicle, vin
+from app.db import init_db
+from app.routers import builds, catalog, catalog_import, search, v1, vehicle, vin
 from app.services.nhtsa_ingest import build_ingest_status
 
 settings = get_settings()
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
-    description="BuildState-first GR86/BRZ configurator and simulator API.",
+    version="0.3.0",
+    description="Seed-mode car builder API with a production-oriented v1 upgrade path.",
 )
 
 app.add_middleware(
@@ -24,11 +25,24 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
+
+
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {
         "status": "ok",
-        "mode": "buildstate-seed",
+        "mode": "seed_mode",
+        "build_storage_mode": settings.build_storage_mode,
+        "integrations": {
+            "postgres": bool(settings.postgres_url),
+            "redis": bool(settings.redis_url),
+            "opensearch": bool(settings.opensearch_url),
+            "object_storage": bool(settings.s3_endpoint_url and settings.s3_bucket),
+            "neo4j_legacy": bool(settings.neo4j_uri),
+        },
         "ingest": build_ingest_status(),
     }
 
@@ -39,3 +53,4 @@ app.include_router(vin.router, prefix=settings.api_prefix)
 app.include_router(builds.router, prefix=settings.api_prefix)
 app.include_router(search.router, prefix=settings.api_prefix)
 app.include_router(catalog_import.router, prefix=settings.api_prefix)
+app.include_router(v1.router, prefix=settings.api_prefix)

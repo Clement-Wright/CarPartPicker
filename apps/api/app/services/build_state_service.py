@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from hashlib import sha256
-from threading import Lock
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -20,10 +19,7 @@ from app.schemas import (
     PresetApplicationResponse,
 )
 from app.services.seed_repository import CatalogRepository, get_repository
-
-
-_BUILDS: dict[str, BuildState] = {}
-_LOCK = Lock()
+from app.services.build_storage_service import get_build_store
 
 
 def _now() -> datetime:
@@ -120,16 +116,14 @@ def create_build(request: CreateBuildRequest, repository: CatalogRepository | No
     )
     build = _normalize_build(build)
 
-    with _LOCK:
-        _BUILDS[build.build_id] = build
-    return build
+    return get_build_store().save(build)
 
 
 def get_build(build_id: str) -> BuildState:
-    try:
-        return _BUILDS[build_id]
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Unknown build id.") from exc
+    build = get_build_store().get(build_id)
+    if build is None:
+        raise HTTPException(status_code=404, detail="Unknown build id.")
+    return build
 
 
 def patch_build(build_id: str, request: PatchBuildPartsRequest, repository: CatalogRepository | None = None) -> BuildState:
@@ -160,9 +154,7 @@ def patch_build(build_id: str, request: PatchBuildPartsRequest, repository: Cata
         }
     )
     updated = _normalize_build(updated)
-    with _LOCK:
-        _BUILDS[build_id] = updated
-    return updated
+    return get_build_store().save(updated)
 
 
 def patch_engine(build_id: str, request: PatchEngineRequest, repository: CatalogRepository | None = None) -> BuildState:
@@ -246,9 +238,7 @@ def patch_engine(build_id: str, request: PatchEngineRequest, repository: Catalog
         }
     )
     updated = _normalize_build(updated)
-    with _LOCK:
-        _BUILDS[build_id] = updated
-    return updated
+    return get_build_store().save(updated)
 
 
 def patch_drivetrain(build_id: str, request: PatchDrivetrainRequest) -> BuildState:
@@ -277,17 +267,14 @@ def patch_drivetrain(build_id: str, request: PatchDrivetrainRequest) -> BuildSta
         }
     )
     updated = _normalize_build(updated)
-    with _LOCK:
-        _BUILDS[build_id] = updated
-    return updated
+    return get_build_store().save(updated)
 
 
 def clone_build(build_id: str) -> CloneBuildResponse:
     build = get_build(build_id)
     cloned = build.model_copy(update={"build_id": str(uuid4())}, deep=True)
     cloned = _normalize_build(cloned)
-    with _LOCK:
-        _BUILDS[cloned.build_id] = cloned
+    get_build_store().save(cloned)
     return CloneBuildResponse(build_id=cloned.build_id, source_build_id=build_id)
 
 

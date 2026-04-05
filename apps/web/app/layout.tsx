@@ -17,8 +17,8 @@ const plex = IBM_Plex_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Catapult Build Graph Planner",
-  description: "A GR86/BRZ build-planning cockpit with deterministic fitment reasoning."
+  title: "CarPartPicker",
+  description: "A seed-mode car build-planning cockpit with deterministic fitment reasoning."
 };
 
 export default function RootLayout({

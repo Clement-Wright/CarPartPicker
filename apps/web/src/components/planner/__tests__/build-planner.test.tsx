@@ -181,7 +181,7 @@ beforeEach(() => {
 describe("BuildPlanner", () => {
   it("renders automation-style controls and modified slots", async () => {
     renderPlanner();
-    await screen.findByText("Automation-style build configurator");
+    await screen.findByText("Free-Roam Car Builder");
     await screen.findByText("Engine Builder");
     expect(await screen.findByText("Modified")).toBeInTheDocument();
   });
