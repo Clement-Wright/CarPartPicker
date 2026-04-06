@@ -23,10 +23,12 @@ from app.production_schemas import (
 )
 from app.schemas import BuildState, RenderSceneObject
 from app.services.build_helpers import active_engine_family, selected_parts
+from app.services.compatibility_engine_service import build_compatibility_diagnostics
 from app.services.dyno_service import build_dyno_snapshot
 from app.services.metrics_service import build_metric_snapshot
 from app.services.production_mapper_service import VisualizationProfile, describe_part_visualization
 from app.services.render_config_service import build_render_config
+from app.services.seed_repository import get_repository
 from app.services.scenario_service import build_scenario_snapshot
 from app.services.validation_service import build_validation_snapshot
 from app.services.vehicle_metrics_service import build_vehicle_metric_snapshot
@@ -119,6 +121,7 @@ def _engine_visualization(build: BuildState) -> VisualizationProfile:
         has_dimensional_specs=True,
         scene_renderable=True,
         catalog_visible=True,
+        anchor_slot="engine_bay",
         proxy_geometry=ProxyGeometry(
             kind="box",
             color="#7e8c97" if engine_family.engine_family_id == "fa24d_native" else "#ff7b31",
@@ -136,12 +139,13 @@ def _engine_visualization(build: BuildState) -> VisualizationProfile:
 
 
 def _profile_for_subsystem(build: BuildState, subsystem: str) -> tuple[str | None, VisualizationProfile]:
+    repository = get_repository()
     if subsystem == "engine":
         return build.engine_build_spec.config_id, _engine_visualization(build)
 
     for selection in build.selections:
         if selection.subsystem == subsystem and selection.selected_part_id is not None:
-            return selection.selected_part_id, describe_part_visualization(selected_parts(build)[subsystem])
+            return selection.selected_part_id, describe_part_visualization(selected_parts(build, repository=repository)[subsystem], repository=repository)
 
     return None, VisualizationProfile(
         mode="unsupported",
@@ -150,6 +154,7 @@ def _profile_for_subsystem(build: BuildState, subsystem: str) -> tuple[str | Non
         has_dimensional_specs=False,
         scene_renderable=False,
         catalog_visible=False,
+        anchor_slot=subsystem,
         proxy_geometry=None,
         dimensions=SceneDimensions(),
         mesh_url=None,
@@ -196,15 +201,17 @@ def _subsystem_outcome(build: BuildState, subsystem: str, reasons: list[str], bl
 
 
 def build_validation_report(build: BuildState) -> BuildValidationReport:
+    repository = get_repository()
     validation = build_validation_snapshot(build, phase="fast")
+    diagnostics, stages = build_compatibility_diagnostics(build)
     grouped_reasons: dict[str, list[str]] = {}
     grouped_blocking: dict[str, bool] = {}
     grouped_fabrication: dict[str, bool] = {}
 
-    for finding in validation.findings:
-        grouped_reasons.setdefault(finding.subsystem, []).append(finding.title)
-        grouped_blocking[finding.subsystem] = grouped_blocking.get(finding.subsystem, False) or finding.blocking or finding.severity == "BLOCKER"
-        grouped_fabrication[finding.subsystem] = grouped_fabrication.get(finding.subsystem, False) or finding.severity == "FABRICATION_REQUIRED"
+    for diagnostic in diagnostics:
+        grouped_reasons.setdefault(diagnostic.subsystem, []).append(diagnostic.error_code)
+        grouped_blocking[diagnostic.subsystem] = grouped_blocking.get(diagnostic.subsystem, False) or diagnostic.severity == "error"
+        grouped_fabrication[diagnostic.subsystem] = grouped_fabrication.get(diagnostic.subsystem, False) or diagnostic.severity == "fabrication"
 
     subsystem_order = [slot.subsystem for slot in build.base_config.subsystem_slots]
     subsystem_outcomes = [
@@ -221,6 +228,7 @@ def build_validation_report(build: BuildState) -> BuildValidationReport:
 
     support_notes = [
         "Visualization coverage does not change whether a part is mechanically valid, priced, or simulated.",
+        "Compatibility diagnostics are evaluated in keyed, dimensional, systems, and dependency stages against the canonical build state.",
     ]
     if visualization_summary.catalog_only:
         support_notes.append("Some selected parts are specs-only and will be omitted from the 3D scene while remaining fully active in the build.")
@@ -230,9 +238,12 @@ def build_validation_report(build: BuildState) -> BuildValidationReport:
     return BuildValidationReport(
         build_id=build.build_id,
         build_hash=build.computation.build_hash,
+        source_mode="licensed" if repository.get_vehicle_record(build.vehicle.trim_id) is not None else "seed",
         build=build,
         assembly_graph=build_assembly_graph(build),
         validation=validation,
+        compatibility_diagnostics=diagnostics,
+        compatibility_stages=stages,
         subsystem_outcomes=subsystem_outcomes,
         visualization_summary=visualization_summary,
         support_notes=support_notes,
@@ -251,6 +262,7 @@ def _scene_item_from_object(
     asset_mode: str,
     proxy_geometry: ProxyGeometry | None,
     dimensions: SceneDimensions,
+    anchor_slot: str | None,
     scene_object: RenderSceneObject,
 ) -> SceneItem:
     return SceneItem(
@@ -261,7 +273,7 @@ def _scene_item_from_object(
         proxy_geometry=proxy_geometry,
         dimensions=dimensions,
         transform=_transform_from_scene_object(scene_object),
-        anchor=SceneAnchor(slot=scene_object.slot, zone=subsystem),
+        anchor=SceneAnchor(slot=anchor_slot or scene_object.slot, zone=subsystem),
     )
 
 
@@ -327,8 +339,9 @@ def _generate_tire_scene_objects(build: BuildState, wheel_objects: list[RenderSc
 
 
 def build_scene_response(build: BuildState) -> BuildSceneResponse:
+    repository = get_repository()
     render_config = build_render_config(build)
-    selected = selected_parts(build)
+    selected = selected_parts(build, repository=repository)
     objects = list(render_config.scene_objects)
     wheel_objects = _wheel_corner_objects(objects)
     objects.extend(_generate_tire_scene_objects(build, wheel_objects))
@@ -345,7 +358,7 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
         if selection.selected_part_id is None:
             continue
         part = selected[selection.subsystem]
-        profile = describe_part_visualization(part)
+        profile = describe_part_visualization(part, repository=repository)
 
         if not profile.scene_renderable:
             omitted_items.append(
@@ -373,6 +386,7 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
                     asset_mode=profile.mode,
                     proxy_geometry=profile.proxy_geometry,
                     dimensions=profile.dimensions,
+                    anchor_slot=profile.anchor_slot,
                     scene_object=scene_object,
                 )
             )
@@ -387,6 +401,7 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
                 asset_mode=engine_profile.mode,
                 proxy_geometry=engine_profile.proxy_geometry,
                 dimensions=engine_profile.dimensions,
+                anchor_slot=engine_profile.anchor_slot,
                 scene_object=scene_object,
             )
         )
@@ -401,6 +416,7 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
     return BuildSceneResponse(
         build_id=build.build_id,
         build_hash=build.computation.build_hash,
+        source_mode="licensed" if repository.get_vehicle_record(build.vehicle.trim_id) is not None else "seed",
         items=items,
         omitted_items=omitted_items,
         highlights=[SceneHighlight(zone=item.zone, severity=item.severity, message=item.message) for item in render_config.highlights],
@@ -409,6 +425,7 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
 
 
 def simulate_build(build: BuildState, mode: str) -> SimulationResponse:
+    repository = get_repository()
     if mode == "engine":
         snapshot = build_dyno_snapshot(build)
         payload = snapshot.model_dump()
@@ -439,5 +456,6 @@ def simulate_build(build: BuildState, mode: str) -> SimulationResponse:
         build_id=build.build_id,
         build_hash=build.computation.build_hash,
         mode=mode,
+        source_mode="licensed" if repository.get_vehicle_record(build.vehicle.trim_id) is not None else "seed",
         payload=payload,
     )

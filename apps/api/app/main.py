@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db import init_db
 from app.routers import builds, catalog, catalog_import, search, v1, vehicle, vin
+from app.services.catalog_ingest_service import ensure_imported_slice
 from app.services.nhtsa_ingest import build_ingest_status
 
 settings = get_settings()
@@ -28,13 +29,14 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    ensure_imported_slice()
 
 
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {
         "status": "ok",
-        "mode": "seed_mode",
+        "mode": "imported_slice_active",
         "build_storage_mode": settings.build_storage_mode,
         "integrations": {
             "postgres": bool(settings.postgres_url),

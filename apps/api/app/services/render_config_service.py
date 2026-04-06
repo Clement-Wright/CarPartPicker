@@ -57,6 +57,26 @@ def build_render_config(build: BuildState) -> RenderConfig:
                     )
                 )
             continue
+        if subsystem == "brakes":
+            for corner, x, z in [
+                ("front_left_brake", -0.72, 1.05),
+                ("front_right_brake", 0.72, 1.05),
+                ("rear_left_brake", -0.72, -1.05),
+                ("rear_right_brake", 0.72, -1.05),
+            ]:
+                objects.append(
+                    RenderSceneObject(
+                        object_id=f"{part.part_id}-{corner}",
+                        slot=corner,
+                        kind=asset.kind,
+                        color=asset.color,
+                        position=(x, -0.28 - (ride_drop / 220), z),
+                        scale=asset.scale,
+                        rotation=asset.rotation,
+                        highlight=severity_by_part.get(part.part_id, "none"),
+                    )
+                )
+            continue
         if subsystem == "tires":
             continue
         objects.append(

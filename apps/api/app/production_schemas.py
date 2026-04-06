@@ -29,6 +29,17 @@ class ReadinessNote(StrictModel):
     message: str
 
 
+class SourceRecordSummary(StrictModel):
+    source_id: str
+    provider: str
+    source_record_id: str
+    import_run_id: str
+    verification_status: str
+    observed_at: str
+    updated_at: str
+    summary: str
+
+
 class ProxyGeometry(StrictModel):
     kind: Literal["box", "cylinder", "disc"]
     color: str = "#9aa8b3"
@@ -74,11 +85,16 @@ class VisualizationSummary(StrictModel):
 class PriceSnapshotView(StrictModel):
     source: str
     source_mode: CatalogDataMode
+    provider: str | None = None
+    source_id: str | None = None
+    source_record_id: str | None = None
+    import_run_id: str | None = None
     price_usd: float
     currency: str = "USD"
     availability: str = "unknown"
     product_url: str | None = None
     observed_at: str
+    provenance_summary: str | None = None
 
 
 class PartSummaryV1(StrictModel):
@@ -100,6 +116,7 @@ class PartSummaryV1(StrictModel):
     geometry: dict[str, Any] = Field(default_factory=dict)
     performance: dict[str, Any] = Field(default_factory=dict)
     visualization_notes: list[ReadinessNote] = Field(default_factory=list)
+    record_provenance: SourceRecordSummary | None = None
 
 
 class PartDetailV1(PartSummaryV1):
@@ -130,6 +147,7 @@ class VehicleSearchItem(StrictModel):
     body_style: str
     source_mode: CatalogDataMode = "seed"
     supported_domains: list[str] = Field(default_factory=lambda: ["ice_road_vehicle"])
+    record_provenance: SourceRecordSummary | None = None
 
 
 class VehicleSearchResponse(StrictModel):
@@ -144,6 +162,7 @@ class VehicleDetailV1(StrictModel):
     production_ready: bool = False
     supported_domains: list[str] = Field(default_factory=lambda: ["ice_road_vehicle"])
     readiness_notes: list[ReadinessNote] = Field(default_factory=list)
+    record_provenance: SourceRecordSummary | None = None
 
 
 class BuildAssemblyPatchRequest(StrictModel):
@@ -190,6 +209,26 @@ class SubsystemFitmentOutcome(StrictModel):
     support_notes: list[ReadinessNote] = Field(default_factory=list)
 
 
+class CompatibilityDiagnostic(StrictModel):
+    stage: Literal["keyed_compatibility", "dimensional_compatibility", "systems_compatibility", "dependency_rules"]
+    error_code: str
+    severity: Literal["info", "warning", "error", "fabrication"]
+    source_part_or_config: str
+    target_part_or_slot: str
+    subsystem: str
+    explanation: str
+    suggested_fix: str
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompatibilityStageSummary(StrictModel):
+    stage: Literal["keyed_compatibility", "dimensional_compatibility", "systems_compatibility", "dependency_rules"]
+    diagnostics: int = 0
+    errors: int = 0
+    warnings: int = 0
+    fabrication: int = 0
+
+
 class BuildValidationReport(StrictModel):
     build_id: str
     build_hash: str
@@ -197,6 +236,8 @@ class BuildValidationReport(StrictModel):
     build: BuildState
     assembly_graph: BuildAssemblyGraph
     validation: BuildValidationSnapshot
+    compatibility_diagnostics: list[CompatibilityDiagnostic] = Field(default_factory=list)
+    compatibility_stages: list[CompatibilityStageSummary] = Field(default_factory=list)
     subsystem_outcomes: list[SubsystemFitmentOutcome]
     visualization_summary: VisualizationSummary = Field(default_factory=VisualizationSummary)
     support_notes: list[str] = Field(default_factory=list)

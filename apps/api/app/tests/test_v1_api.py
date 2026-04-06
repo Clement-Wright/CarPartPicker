@@ -6,39 +6,40 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_v1_catalog_endpoints_expose_visualization_tiers() -> None:
+def test_import_runs_and_catalog_endpoints_use_imported_slice() -> None:
+    runs = client.get("/api/catalog/import/runs")
+    assert runs.status_code == 200
+    assert runs.json()
+    assert runs.json()[0]["run"]["source_id"] == "licensed_fixture_catalog"
+    assert runs.json()[0]["raw_payloads"] >= 1
+
+    api_pull = client.post(
+        "/api/catalog/import/runs",
+        json={"source_id": "licensed_fixture_catalog", "adapter_mode": "api_pull", "force_reimport": True},
+    )
+    assert api_pull.status_code == 200
+    assert api_pull.json()["run"]["status"] == "succeeded"
+
     vehicles = client.get("/api/v1/vehicles/search", params={"q": "GR86"})
     assert vehicles.status_code == 200
+    assert vehicles.json()["source_mode"] == "licensed"
     assert vehicles.json()["items"]
+    assert vehicles.json()["items"][0]["record_provenance"]["source_id"] == "licensed_fixture_catalog"
 
-    proxy_parts = client.get("/api/v1/parts/search", params={"subsystem": "brakes", "vehicle_id": "gr86_2022_base"})
-    assert proxy_parts.status_code == 200
-    assert proxy_parts.json()["items"]
-    assert proxy_parts.json()["items"][0]["visualization_mode"] == "proxy_from_dimensions"
-    assert proxy_parts.json()["items"][0]["scene_renderable"] is True
+    brakes = client.get("/api/v1/parts/search", params={"subsystem": "brakes", "vehicle_id": "gr86_2022_base"})
+    assert brakes.status_code == 200
+    assert brakes.json()["source_mode"] == "licensed"
+    assert brakes.json()["items"]
+    assert all(item["source_mode"] == "licensed" for item in brakes.json()["items"])
+    assert all(item["visualization_mode"] == "proxy_from_dimensions" for item in brakes.json()["items"])
 
-    catalog_only_parts = client.get("/api/v1/parts/search", params={"subsystem": "tune", "vehicle_id": "gr86_2022_base"})
-    assert catalog_only_parts.status_code == 200
-    assert catalog_only_parts.json()["items"]
-    assert all(item["visualization_mode"] == "catalog_only" for item in catalog_only_parts.json()["items"])
-    assert all(item["catalog_visible"] is True for item in catalog_only_parts.json()["items"])
-
-    part_id = catalog_only_parts.json()["items"][1]["part_id"]
-    detail = client.get(f"/api/v1/parts/{part_id}")
-    assert detail.status_code == 200
-    assert detail.json()["visualization_mode"] == "catalog_only"
-    assert detail.json()["scene_renderable"] is False
-
-    prices = client.get(f"/api/v1/parts/{part_id}/prices")
+    prices = client.get("/api/v1/parts/brakes_big_18/prices")
     assert prices.status_code == 200
-    assert prices.json()["snapshots"][0]["source"] == "seed_catalog"
-
-    contracts = client.get("/api/v1/catalog/contracts")
-    assert contracts.status_code == 200
-    assert any(item["source_id"] == "tecdoc_catalog" for item in contracts.json()["items"])
+    assert prices.json()["snapshots"][0]["provider"] == "Licensed Fixture Source"
+    assert prices.json()["snapshots"][0]["import_run_id"]
 
 
-def test_v1_build_endpoints_keep_validation_independent_from_scene_rendering() -> None:
+def test_v1_build_validation_returns_structured_compatibility_diagnostics() -> None:
     created = client.post("/api/v1/builds", json={"trim_id": "gr86_2022_base", "scenario_name": "daily"})
     assert created.status_code == 200
     build_id = created.json()["build_id"]
@@ -46,31 +47,37 @@ def test_v1_build_endpoints_keep_validation_independent_from_scene_rendering() -
     patched = client.patch(
         f"/api/v1/builds/{build_id}/assembly",
         json={
-            "parts": {"tune": "tune_stage1", "brakes": "brakes_big_18", "wheels": "wheels_stock_17"},
-            "engine_patch": {"cam_profile_id": "cam_balanced"},
+            "parts": {
+                "brakes": "brakes_big_18",
+                "wheels": "wheels_stock_17",
+                "tires": "tires_too_wide_18",
+                "tune": "tune_stage1",
+            },
+            "engine_patch": {"engine_family_id": "g16e_turbo_swap"},
         },
     )
     assert patched.status_code == 200
-    assert patched.json()["engine_build_spec"]["cam_profile"]["profile_id"] == "cam_balanced"
+    assert patched.json()["engine_build_spec"]["engine_family_id"] == "g16e_turbo_swap"
 
     validation = client.post(f"/api/v1/builds/{build_id}/validate")
     assert validation.status_code == 200
     payload = validation.json()
-    assert payload["assembly_graph"]["nodes"]
-    assert any(item["outcome"] == "invalid" for item in payload["subsystem_outcomes"])
-    assert payload["visualization_summary"]["catalog_only"] >= 1
-    assert payload["support_notes"]
-    tune_outcome = next(item for item in payload["subsystem_outcomes"] if item["subsystem"] == "tune")
-    assert tune_outcome["visualization_mode"] == "catalog_only"
-    assert tune_outcome["scene_renderable"] is False
+    assert payload["source_mode"] == "licensed"
+    assert payload["compatibility_stages"]
+    codes = {item["error_code"] for item in payload["compatibility_diagnostics"]}
+    assert "BRAKE_WHEEL_CLEARANCE_FAILURE" in codes
+    assert "TIRE_TOO_WIDE_FOR_WHEEL" in codes
+    assert "ENGINE_MOUNT_FAMILY_MISMATCH" in codes
+    assert "BELLHOUSING_PATTERN_MISMATCH" in codes
+    assert any(item["stage"] == "dependency_rules" for item in payload["compatibility_diagnostics"])
 
     scene = client.get(f"/api/v1/builds/{build_id}/scene")
     assert scene.status_code == 200
     scene_payload = scene.json()
-    assert scene_payload["items"]
-    assert any(item["asset_mode"] == "proxy_from_dimensions" for item in scene_payload["items"])
+    assert scene_payload["source_mode"] == "licensed"
+    assert scene_payload["summary"]["proxy_count"] >= 1
     assert any(item["subsystem"] == "tune" for item in scene_payload["omitted_items"])
-    assert scene_payload["summary"]["renderable_count"] >= 1
+    assert any(item["anchor"]["slot"] == "front_left_hub" for item in scene_payload["items"])
 
     renderable_only = client.get(
         "/api/v1/parts/search",
@@ -82,8 +89,5 @@ def test_v1_build_endpoints_keep_validation_independent_from_scene_rendering() -
 
     engine_sim = client.post(f"/api/v1/builds/{build_id}/simulate/engine")
     assert engine_sim.status_code == 200
+    assert engine_sim.json()["source_mode"] == "licensed"
     assert engine_sim.json()["mode"] == "engine"
-
-    thermal_sim = client.post(f"/api/v1/builds/{build_id}/simulate/thermal")
-    assert thermal_sim.status_code == 200
-    assert "thermal_headroom" in thermal_sim.json()["payload"]

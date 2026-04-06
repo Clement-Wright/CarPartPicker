@@ -17,12 +17,15 @@ from app.production_schemas import (
     ProxyGeometry,
     ReadinessNote,
     SceneDimensions,
+    SourceRecordSummary,
     VehicleDetailV1,
     VehicleSearchItem,
     VehicleSearchResponse,
     VisualizationMode,
 )
+from app.catalog_import_schemas import SUPPORTED_IMPORTED_PART_SUBSYSTEMS
 from app.schemas import PartCatalogItem
+from app.services.catalog_index_service import get_catalog_index
 from app.services.seed_repository import CatalogRepository, get_repository
 
 
@@ -49,10 +52,26 @@ class VisualizationProfile:
     has_dimensional_specs: bool
     scene_renderable: bool
     catalog_visible: bool
+    anchor_slot: str | None
     proxy_geometry: ProxyGeometry | None
     dimensions: SceneDimensions
     mesh_url: str | None
     notes: list[ReadinessNote]
+
+
+def _record_summary(provenance) -> SourceRecordSummary | None:
+    if provenance is None:
+        return None
+    return SourceRecordSummary(
+        source_id=provenance.source_id,
+        provider=provenance.provider,
+        source_record_id=provenance.source_record_id,
+        import_run_id=provenance.import_run_id,
+        verification_status=provenance.verification_status,
+        observed_at=provenance.observed_at,
+        updated_at=provenance.updated_at,
+        summary=provenance.summary,
+    )
 
 
 def _now_iso() -> str:
@@ -166,7 +185,46 @@ def _proxy_geometry(part: PartCatalogItem, dimensions: SceneDimensions) -> Proxy
     return None
 
 
-def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
+def _default_anchor_slot(part: PartCatalogItem) -> str:
+    if part.subsystem == "transmission":
+        return "transmission_tunnel"
+    if part.subsystem == "brakes":
+        return "front_left_brake"
+    if part.subsystem in {"wheels", "tires"}:
+        return "front_left_hub"
+    return part.visual.slot
+
+
+def describe_part_visualization(part: PartCatalogItem, *, repository: CatalogRepository | None = None) -> VisualizationProfile:
+    repository = repository or get_repository()
+    record = repository.get_part_record(part.part_id) if hasattr(repository, "get_part_record") else None
+    if record is not None:
+        asset = record.asset_coverage
+        return VisualizationProfile(
+            mode=asset.visualization_mode,
+            has_exact_mesh=asset.visualization_mode == "exact_mesh_ready",
+            has_proxy_geometry=asset.proxy_geometry is not None,
+            has_dimensional_specs=any(
+                value > 0 for value in (asset.dimensions.length_mm, asset.dimensions.width_mm, asset.dimensions.height_mm)
+            ),
+            scene_renderable=asset.scene_renderable,
+            catalog_visible=asset.catalog_visible,
+            anchor_slot=asset.anchor_slot,
+            proxy_geometry=asset.proxy_geometry,
+            dimensions=asset.dimensions,
+            mesh_url=asset.mesh_url,
+            notes=[
+                ReadinessNote(code=f"asset-{index}", message=note)
+                for index, note in enumerate(asset.notes or [], start=1)
+            ]
+            or [
+                ReadinessNote(
+                    code="imported-asset-policy",
+                    message="Visualization policy is sourced from the imported catalog asset manifest.",
+                )
+            ],
+        )
+
     dimensions = _proxy_dimensions(part)
     has_dimensional_specs = _has_dimensional_specs(part, dimensions)
     proxy_geometry = _proxy_geometry(part, dimensions)
@@ -179,6 +237,7 @@ def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
             has_dimensional_specs=has_dimensional_specs,
             scene_renderable=False,
             catalog_visible=True,
+            anchor_slot=_default_anchor_slot(part),
             proxy_geometry=None,
             dimensions=dimensions,
             mesh_url=None,
@@ -202,6 +261,7 @@ def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
             has_dimensional_specs=True,
             scene_renderable=True,
             catalog_visible=True,
+            anchor_slot=_default_anchor_slot(part),
             proxy_geometry=proxy_geometry,
             dimensions=dimensions,
             mesh_url=None,
@@ -221,6 +281,7 @@ def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
             has_dimensional_specs=True,
             scene_renderable=True,
             catalog_visible=True,
+            anchor_slot=_default_anchor_slot(part),
             proxy_geometry=proxy_geometry,
             dimensions=dimensions,
             mesh_url=None,
@@ -239,6 +300,7 @@ def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
         has_dimensional_specs=has_dimensional_specs,
         scene_renderable=False,
         catalog_visible=False,
+        anchor_slot=_default_anchor_slot(part),
         proxy_geometry=None,
         dimensions=dimensions,
         mesh_url=None,
@@ -251,8 +313,10 @@ def describe_part_visualization(part: PartCatalogItem) -> VisualizationProfile:
     )
 
 
-def map_part_summary(part: PartCatalogItem) -> PartSummaryV1:
-    visualization = describe_part_visualization(part)
+def map_part_summary(part: PartCatalogItem, repository: CatalogRepository | None = None) -> PartSummaryV1:
+    repository = repository or get_repository()
+    visualization = describe_part_visualization(part, repository=repository)
+    record = repository.get_part_record(part.part_id) if hasattr(repository, "get_part_record") else None
     return PartSummaryV1(
         part_id=part.part_id,
         subsystem=part.subsystem,
@@ -261,7 +325,8 @@ def map_part_summary(part: PartCatalogItem) -> PartSummaryV1:
         notes=part.notes,
         tags=part.tags,
         cost_usd=part.cost_usd,
-        production_ready=part.lineage.verification_status == "verified",
+        source_mode="licensed" if record is not None else "seed",
+        production_ready=(record is not None and record.provenance.verification_status == "verified"),
         visualization_mode=visualization.mode,
         has_exact_mesh=visualization.has_exact_mesh,
         has_proxy_geometry=visualization.has_proxy_geometry,
@@ -271,11 +336,12 @@ def map_part_summary(part: PartCatalogItem) -> PartSummaryV1:
         geometry=part.geometry.model_dump(),
         performance=part.performance.model_dump(),
         visualization_notes=visualization.notes,
+        record_provenance=_record_summary(record.provenance if record is not None else None),
     )
 
 
-def map_part_detail(part: PartCatalogItem) -> PartDetailV1:
-    summary = map_part_summary(part)
+def map_part_detail(part: PartCatalogItem, repository: CatalogRepository | None = None) -> PartDetailV1:
+    summary = map_part_summary(part, repository=repository)
     return PartDetailV1(
         **summary.model_dump(),
         compatible_platforms=part.compatible_platforms,
@@ -297,40 +363,55 @@ def list_parts_v1(
     repository: CatalogRepository | None = None,
 ) -> PartSearchResponse:
     repository = repository or get_repository()
-    items = repository.list_parts()
+    imported_ids = get_catalog_index().search_part_ids(
+        query=query,
+        subsystem=subsystem if subsystem in SUPPORTED_IMPORTED_PART_SUBSYSTEMS or subsystem is None else None,
+        tag=tag,
+        vehicle_id=vehicle_id,
+    )
+    imported_items = [repository.get_part(part_id) for part_id in imported_ids]
 
+    seed_candidates = [
+        item
+        for item in repository.list_parts()
+        if item.subsystem not in SUPPORTED_IMPORTED_PART_SUBSYSTEMS
+    ]
     if vehicle_id:
         try:
             vehicle = repository.get_trim(vehicle_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown vehicle.") from exc
-        items = [
+        seed_candidates = [
             item
-            for item in items
+            for item in seed_candidates
             if vehicle.platform in item.compatible_platforms
             and (vehicle.transmission in item.compatible_transmissions or "any" in item.compatible_transmissions)
         ]
-
     if query:
         query_lower = query.lower()
-        items = [
+        seed_candidates = [
             item
-            for item in items
+            for item in seed_candidates
             if query_lower in item.label.lower()
             or query_lower in item.brand.lower()
             or query_lower in item.notes.lower()
             or query_lower in item.part_id.lower()
         ]
     if subsystem:
-        items = [item for item in items if item.subsystem == subsystem]
+        if subsystem in SUPPORTED_IMPORTED_PART_SUBSYSTEMS:
+            seed_candidates = []
+        else:
+            seed_candidates = [item for item in seed_candidates if item.subsystem == subsystem]
     if tag:
-        items = [item for item in items if tag in item.tags]
+        seed_candidates = [item for item in seed_candidates if tag in item.tags]
 
-    mapped = [map_part_summary(item) for item in sorted(items, key=lambda part: (part.subsystem, part.cost_usd, part.label))]
+    items = [*seed_candidates, *imported_items]
+    mapped = [map_part_summary(item, repository=repository) for item in sorted(items, key=lambda part: (part.subsystem, part.cost_usd, part.label))]
     mapped = [item for item in mapped if item.catalog_visible]
     if renderable_only:
         mapped = [item for item in mapped if item.scene_renderable]
-    return PartSearchResponse(items=mapped, total=len(mapped))
+    source_mode = "licensed" if any(item.source_mode == "licensed" for item in mapped) else "seed"
+    return PartSearchResponse(items=mapped, total=len(mapped), source_mode=source_mode)
 
 
 def get_part_v1(part_id: str, repository: CatalogRepository | None = None) -> PartDetailV1:
@@ -339,7 +420,7 @@ def get_part_v1(part_id: str, repository: CatalogRepository | None = None) -> Pa
         part = repository.get_part(part_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown part.") from exc
-    detail = map_part_detail(part)
+    detail = map_part_detail(part, repository=repository)
     if not detail.catalog_visible:
         raise HTTPException(status_code=404, detail="Unknown part.")
     return detail
@@ -351,16 +432,38 @@ def get_part_prices_v1(part_id: str, repository: CatalogRepository | None = None
         part = repository.get_part(part_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown part.") from exc
-
     snapshots = [
         PriceSnapshotView(
-            source="seed_catalog",
-            source_mode="seed",
-            price_usd=float(part.cost_usd),
-            availability="catalog_seed",
-            observed_at=_now_iso(),
+            source=item.source,
+            source_mode=item.source_mode,
+            provider=item.provider,
+            source_id=item.source_id,
+            source_record_id=item.source_record_id,
+            import_run_id=item.import_run_id,
+            price_usd=item.price_usd,
+            currency=item.currency,
+            availability=item.availability,
+            product_url=item.product_url,
+            observed_at=item.observed_at,
+            provenance_summary=item.provenance_summary,
         )
+        for item in repository.list_price_snapshots(part.part_id)
     ]
+    if not snapshots:
+        snapshots = [
+            PriceSnapshotView(
+                source="seed_catalog",
+                source_mode="seed",
+                provider="seed_catalog",
+                source_id="seed_catalog",
+                source_record_id=part.part_id,
+                import_run_id="seed_parts_2026q2",
+                price_usd=float(part.cost_usd),
+                availability="catalog_seed",
+                observed_at=_now_iso(),
+                provenance_summary="Seed catalog fallback pricing.",
+            )
+        ]
     return PartPricesResponse(part_id=part.part_id, snapshots=snapshots)
 
 
@@ -371,30 +474,23 @@ def list_vehicles_v1(
     repository: CatalogRepository | None = None,
 ) -> VehicleSearchResponse:
     repository = repository or get_repository()
-    trims = repository.list_trims()
-    if query:
-        query_lower = query.lower()
-        trims = [
-            trim
-            for trim in trims
-            if query_lower in f"{trim.year} {trim.make} {trim.model} {trim.trim}".lower()
-            or query_lower in trim.trim_id.lower()
-            or query_lower in trim.platform.lower()
-        ]
-    if transmission:
-        trims = [trim for trim in trims if trim.transmission == transmission]
-
-    items = [
-        VehicleSearchItem(
-            trim_id=trim.trim_id,
-            label=f"{trim.year} {trim.make} {trim.model} {trim.trim}",
-            platform=trim.platform,
-            transmission=trim.transmission,
-            body_style=trim.body_style,
+    vehicle_ids = get_catalog_index().search_vehicle_ids(query=query, transmission=transmission)
+    items = []
+    for vehicle_id in vehicle_ids:
+        trim = repository.get_trim(vehicle_id)
+        record = repository.get_vehicle_record(vehicle_id) if hasattr(repository, "get_vehicle_record") else None
+        items.append(
+            VehicleSearchItem(
+                trim_id=trim.trim_id,
+                label=f"{trim.year} {trim.make} {trim.model} {trim.trim}",
+                platform=trim.platform,
+                transmission=trim.transmission,
+                body_style=trim.body_style,
+                source_mode="licensed" if record is not None else "seed",
+                record_provenance=_record_summary(record.provenance if record is not None else None),
+            )
         )
-        for trim in trims
-    ]
-    return VehicleSearchResponse(items=items, total=len(items))
+    return VehicleSearchResponse(items=items, total=len(items), source_mode="licensed" if items else "seed")
 
 
 def get_vehicle_v1(trim_id: str, repository: CatalogRepository | None = None) -> VehicleDetailV1:
@@ -403,15 +499,27 @@ def get_vehicle_v1(trim_id: str, repository: CatalogRepository | None = None) ->
         trim = repository.get_trim(trim_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown vehicle.") from exc
+    record = repository.get_vehicle_record(trim_id) if hasattr(repository, "get_vehicle_record") else None
 
     return VehicleDetailV1(
         vehicle=trim,
-        readiness_notes=[
-            ReadinessNote(
-                code="seed-vehicle-snapshot",
-                message="Vehicle coverage is currently served from seed-mode trim snapshots and should be replaced by licensed application data for production.",
-            )
-        ],
+        source_mode="licensed" if record is not None else "seed",
+        readiness_notes=(
+            [
+                ReadinessNote(
+                    code="imported-vehicle-slice",
+                    message="Vehicle coverage for this supported slice is served from the imported canonical catalog path.",
+                )
+            ]
+            if record is not None
+            else [
+                ReadinessNote(
+                    code="seed-vehicle-snapshot",
+                    message="Vehicle coverage is currently served from seed-mode trim snapshots and should be replaced by licensed application data for production.",
+                )
+            ]
+        ),
+        record_provenance=_record_summary(record.provenance if record is not None else None),
     )
 
 

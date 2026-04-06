@@ -10,6 +10,7 @@ from sqlalchemy import delete
 from app.config import get_settings
 from app.db import BuildStateRecord, get_session_factory
 from app.schemas import BuildState
+from app.services.seed_repository import get_repository
 
 
 class BuildStore(ABC):
@@ -51,6 +52,7 @@ class SqlBuildStore(BuildStore):
             raise RuntimeError("Database session factory is not configured.")
 
         payload = build.model_dump(mode="json")
+        source_mode = "licensed" if get_repository().get_vehicle_record(build.vehicle.trim_id) is not None else "seed"
         with session_factory() as session:
             record = session.get(BuildStateRecord, build.build_id)
             if record is None:
@@ -58,13 +60,14 @@ class SqlBuildStore(BuildStore):
                     build_id=build.build_id,
                     build_hash=build.computation.build_hash,
                     revision=build.computation.revision,
-                    source_mode="seed",
+                    source_mode=source_mode,
                     build_json=payload,
                 )
                 session.add(record)
             else:
                 record.build_hash = build.computation.build_hash
                 record.revision = build.computation.revision
+                record.source_mode = source_mode
                 record.build_json = payload
                 record.updated_at = datetime.utcnow()
             session.commit()
