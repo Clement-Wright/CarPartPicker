@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+import logging
+from time import sleep
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.config import get_settings
+
+
+logger = logging.getLogger(__name__)
+DEFAULT_DB_STARTUP_ATTEMPTS = 30
+DEFAULT_DB_STARTUP_DELAY_SECONDS = 1.0
 
 
 class Base(DeclarativeBase):
@@ -271,8 +279,40 @@ def get_session_factory() -> sessionmaker[Session] | None:
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def wait_for_db(
+    *,
+    max_attempts: int = DEFAULT_DB_STARTUP_ATTEMPTS,
+    delay_seconds: float = DEFAULT_DB_STARTUP_DELAY_SECONDS,
+) -> None:
+    engine = get_engine()
+    if engine is None:
+        return
+
+    last_error: OperationalError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with engine.connect() as connection:
+                connection.exec_driver_sql("SELECT 1")
+            return
+        except OperationalError as exc:
+            last_error = exc
+            if attempt == max_attempts:
+                raise
+            logger.warning(
+                "Database connection attempt %s/%s failed; retrying in %.1fs",
+                attempt,
+                max_attempts,
+                delay_seconds,
+            )
+            sleep(delay_seconds)
+
+    if last_error is not None:
+        raise last_error
+
+
 def init_db() -> None:
     engine = get_engine()
     if engine is None:
         return
+    wait_for_db()
     Base.metadata.create_all(engine)
