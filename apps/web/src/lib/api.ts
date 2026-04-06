@@ -12,6 +12,7 @@ import type {
   TargetSpecResponse,
   V1BuildSceneResponse,
   V1BuildValidationReport,
+  V1EngineEditorResponse,
   V1PartDetail,
   V1PartPricesResponse,
   V1PartSearchResponse,
@@ -224,6 +225,8 @@ export const api = {
       body: JSON.stringify(body)
     }),
   getBuildV1: (buildId: string) => request<BuildState>(`/v1/builds/${buildId}`),
+  getEngineEditorV1: (buildId: string) =>
+    request<V1EngineEditorResponse>(`/v1/builds/${buildId}/engine-editor`),
   patchBuildAssemblyV1: (
     buildId: string,
     body: {
@@ -243,18 +246,32 @@ export const api = {
         bore_mm?: number;
         stroke_mm?: number;
         compression_ratio?: number;
+        rod_length_mm?: number;
         head_flow_stage?: "stock" | "street" | "race";
         valves_per_cylinder?: number;
         variable_valve_timing?: boolean;
         cam_profile_id?: string;
+        intake_cam_duration_deg?: number;
+        exhaust_cam_duration_deg?: number;
+        intake_lift_mm?: number;
+        exhaust_lift_mm?: number;
+        lobe_separation_deg?: number;
         induction_type?: "na" | "turbo" | "supercharger";
         boost_psi?: number;
+        compressor_efficiency?: number;
+        intercooler_effectiveness?: number;
         fuel_type?: "91_octane" | "93_octane" | "e85";
         injector_scale?: "stock" | "upgrade" | "high_flow";
         pump_scale?: "stock" | "upgrade" | "high_flow";
+        target_lambda?: number;
+        ignition_advance_bias_deg?: number;
         exhaust_style?: "stock" | "catback" | "turbo_back" | "equal_length";
+        exhaust_backpressure_factor?: number;
         tune_bias?: "comfort" | "balanced" | "aggressive";
         rev_limit_rpm?: number;
+        radiator_effectiveness?: number;
+        ambient_temp_c?: number;
+        altitude_m?: number;
       };
       drivetrain_patch?: {
         label?: string;

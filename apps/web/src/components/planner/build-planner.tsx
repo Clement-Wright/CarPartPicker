@@ -11,12 +11,15 @@ import type {
   BuildDynoSnapshot,
   BuildScenarioSnapshot,
   MetricSet,
+  V1EngineEditorField,
+  V1EngineEditorResponse,
   V1PartSummary,
   VisualizationMode
 } from "@/lib/types";
 import { useBuildStore } from "@/state/build-store";
 
 type Tab = "validate" | "dyno" | "vehicle" | "handling";
+type FieldDrafts = Record<string, string>;
 
 const TABS: Tab[] = ["validate", "dyno", "vehicle", "handling"];
 const SCENARIOS = [
@@ -37,6 +40,18 @@ function badgeTone(mode: VisualizationMode) {
   if (mode === "proxy_from_dimensions") return "border-sky-300/20 bg-sky-300/10 text-sky-100";
   if (mode === "catalog_only") return "border-white/10 bg-white/5 text-slate-200";
   return "border-red-300/20 bg-red-300/10 text-red-100";
+}
+
+function calibrationTone(state?: "seed_heuristic" | "calibration_required" | "calibrated") {
+  if (state === "calibrated") return "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";
+  if (state === "calibration_required") return "border-amber-300/25 bg-amber-300/10 text-amber-100";
+  return "border-white/10 bg-white/5 text-slate-200";
+}
+
+function calibrationLabel(state?: "seed_heuristic" | "calibration_required" | "calibrated") {
+  if (state === "calibrated") return "Calibrated";
+  if (state === "calibration_required") return "Estimate";
+  return "Seed";
 }
 
 function summarizePerformance(part: V1PartSummary) {
@@ -67,6 +82,56 @@ function handlingSnapshot(payload?: Record<string, unknown>) {
   return payload && "result" in payload ? (payload as BuildScenarioSnapshot) : undefined;
 }
 
+function toDraftValue(value: string | number | boolean | null | undefined) {
+  return value == null ? "" : String(value);
+}
+
+function buildDrafts(editor?: V1EngineEditorResponse): FieldDrafts {
+  if (!editor) return {};
+  return Object.fromEntries(
+    editor.groups.flatMap((group) => group.fields.map((field) => [field.field_id, toDraftValue(field.current_value)]))
+  );
+}
+
+function parseNumber(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function buildAssemblyPatchFromEditor(editor: V1EngineEditorResponse | undefined, drafts: FieldDrafts) {
+  if (!editor) return {};
+
+  const enginePatch: Record<string, unknown> = {};
+  const drivetrainPatch: Record<string, unknown> = {};
+  const gearRatios: number[] = [];
+
+  for (const group of editor.groups) {
+    for (const field of group.fields) {
+      const rawValue = drafts[field.field_id] ?? toDraftValue(field.current_value);
+      const value = field.input_kind === "number" ? parseNumber(rawValue) : rawValue;
+      if (value == null || rawValue === "") continue;
+
+      if (group.group_id === "drivetrain") {
+        if (field.field_id.startsWith("gear_ratio_")) {
+          const index = Number(field.field_id.replace("gear_ratio_", "")) - 1;
+          if (index >= 0 && typeof value === "number") gearRatios[index] = value;
+        } else {
+          drivetrainPatch[field.field_id] = value;
+        }
+      } else {
+        enginePatch[field.field_id] = value;
+      }
+    }
+  }
+
+  if (gearRatios.length) drivetrainPatch.gear_ratios = gearRatios.filter((ratio) => typeof ratio === "number");
+
+  return {
+    ...(Object.keys(enginePatch).length ? { engine_patch: enginePatch } : {}),
+    ...(Object.keys(drivetrainPatch).length ? { drivetrain_patch: drivetrainPatch } : {})
+  };
+}
+
 export function BuildPlanner() {
   const queryClient = useQueryClient();
   const [buildId, setBuildId] = useState<string | null>(null);
@@ -75,20 +140,8 @@ export function BuildPlanner() {
   const [budget, setBudget] = useState("5000");
   const [targetHp, setTargetHp] = useState("");
   const [maxWeight, setMaxWeight] = useState("");
-  const [bore, setBore] = useState("94");
-  const [stroke, setStroke] = useState("86");
-  const [compression, setCompression] = useState("12.5");
-  const [boost, setBoost] = useState("0");
-  const [revLimit, setRevLimit] = useState("7500");
-  const [cam, setCam] = useState("cam_street");
-  const [headFlow, setHeadFlow] = useState<"stock" | "street" | "race">("stock");
-  const [tuneBias, setTuneBias] = useState<"comfort" | "balanced" | "aggressive">("comfort");
-  const [induction, setInduction] = useState<"na" | "turbo" | "supercharger">("na");
-  const [fuel, setFuel] = useState<"91_octane" | "93_octane" | "e85">("93_octane");
-  const [finalDrive, setFinalDrive] = useState("4.1");
-  const [loss, setLoss] = useState("0.13");
-  const [diffBias, setDiffBias] = useState<"street_lsd" | "track_lsd" | "open" | "torsen">("street_lsd");
   const [showRenderableOnly, setShowRenderableOnly] = useState(false);
+  const [fieldDrafts, setFieldDrafts] = useState<FieldDrafts>({});
 
   const dirtySlots = useBuildStore((state) => state.dirtySlots);
   const setDirtySlots = useBuildStore((state) => state.setDirtySlots);
@@ -105,10 +158,10 @@ export function BuildPlanner() {
   const vehiclesQuery = useQuery({ queryKey: ["v1", "vehicles"], queryFn: () => api.searchVehiclesV1() });
   const createBuild = useMutation({
     mutationFn: api.createBuildV1,
-    onSuccess: (build) => {
-      setBuildId(build.build_id);
-      setTrimId(build.vehicle.trim_id);
-      queryClient.setQueryData(["v1", "build", build.build_id], build);
+    onSuccess: (nextBuild) => {
+      setBuildId(nextBuild.build_id);
+      setTrimId(nextBuild.vehicle.trim_id);
+      queryClient.setQueryData(["v1", "build", nextBuild.build_id], nextBuild);
     }
   });
   const buildQuery = useQuery({
@@ -118,6 +171,11 @@ export function BuildPlanner() {
   });
   const build = buildQuery.data;
   const hash = build?.computation.build_hash;
+  const engineEditorQuery = useQuery({
+    queryKey: ["v1", "build", buildId, hash, "engine-editor"],
+    queryFn: () => api.getEngineEditorV1(buildId!),
+    enabled: Boolean(buildId && hash)
+  });
   const partsQuery = useQuery({
     queryKey: ["v1", "parts", build?.vehicle.trim_id],
     queryFn: () => api.searchPartsV1({ vehicleId: build!.vehicle.trim_id }),
@@ -136,6 +194,11 @@ export function BuildPlanner() {
   const engineQuery = useQuery({
     queryKey: ["v1", "build", buildId, hash, "engine"],
     queryFn: () => api.simulateBuildV1(buildId!, "engine"),
+    enabled: Boolean(buildId && hash)
+  });
+  const thermalQuery = useQuery({
+    queryKey: ["v1", "build", buildId, hash, "thermal"],
+    queryFn: () => api.simulateBuildV1(buildId!, "thermal"),
     enabled: Boolean(buildId && hash)
   });
   const vehicleQuery = useQuery({
@@ -168,19 +231,6 @@ export function BuildPlanner() {
     setBudget(build.target_metrics.budget_max ? String(build.target_metrics.budget_max) : "");
     setTargetHp(build.target_metrics.hp_min ? String(build.target_metrics.hp_min) : "");
     setMaxWeight(build.target_metrics.weight_max_lb ? String(build.target_metrics.weight_max_lb) : "");
-    setBore(String(build.engine_build_spec.bore_mm));
-    setStroke(String(build.engine_build_spec.stroke_mm));
-    setCompression(String(build.engine_build_spec.compression_ratio));
-    setBoost(String(build.engine_build_spec.induction.boost_psi));
-    setRevLimit(String(build.engine_build_spec.rev_limit_rpm));
-    setCam(build.engine_build_spec.cam_profile.profile_id);
-    setHeadFlow(build.engine_build_spec.valve_train.head_flow_stage);
-    setTuneBias(build.engine_build_spec.tune_bias);
-    setInduction(build.engine_build_spec.induction.type);
-    setFuel(build.engine_build_spec.fuel.fuel_type);
-    setFinalDrive(String(build.drivetrain_config.final_drive_ratio));
-    setLoss(String(build.drivetrain_config.driveline_loss_factor));
-    setDiffBias(build.drivetrain_config.differential_bias);
 
     const stockParts = Object.fromEntries(build.base_config.stock_parts.map((item) => [item.subsystem, item.stock_part_id]));
     const stockConfigs = Object.fromEntries(build.base_config.stock_configs.map((item) => [item.subsystem, item.stock_config_id]));
@@ -190,6 +240,10 @@ export function BuildPlanner() {
         .map((selection) => selection.subsystem)
     );
   }, [build, setDirtySlots]);
+
+  useEffect(() => {
+    setFieldDrafts(buildDrafts(engineEditorQuery.data));
+  }, [engineEditorQuery.data?.build_hash]);
 
   useEffect(() => {
     setFreshness({ fast: validationQuery.data?.build_hash === hash, heavy: validationQuery.data?.build_hash === hash });
@@ -209,6 +263,7 @@ export function BuildPlanner() {
   const currentMetrics = vehicleMetrics(vehicleQuery.data?.payload);
   const dyno = dynoSnapshot(engineQuery.data?.payload);
   const handling = handlingSnapshot(handlingQuery.data?.payload);
+  const thermalPayload = thermalQuery.data?.payload;
   const partById = useMemo(() => Object.fromEntries((partsQuery.data?.items ?? []).map((item) => [item.part_id, item])), [partsQuery.data?.items]);
   const optionsBySubsystem = useMemo(() => {
     const grouped: Record<string, V1PartSummary[]> = {};
@@ -219,6 +274,69 @@ export function BuildPlanner() {
     }
     return grouped;
   }, [build?.selections, partsQuery.data?.items, showRenderableOnly]);
+
+  const applyEditorPatch = async () => {
+    const patchBody = buildAssemblyPatchFromEditor(engineEditorQuery.data, fieldDrafts);
+    if (Object.keys(patchBody).length) await patchAssembly.mutateAsync(patchBody);
+  };
+
+  const renderField = (field: V1EngineEditorField) => {
+    const value = fieldDrafts[field.field_id] ?? toDraftValue(field.current_value);
+    return (
+      <div key={field.field_id} className="rounded-[22px] border border-white/8 bg-black/10 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-display text-xs uppercase tracking-[0.18em] text-slate-300">{field.label}</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Default {toDraftValue(field.default_value)}
+              {field.unit ? ` ${field.unit}` : ""}
+            </p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-300">
+            {field.source.replace(/_/g, " ")}
+          </span>
+        </div>
+
+        {field.input_kind === "select" ? (
+          <select
+            value={value}
+            onChange={(event) => setFieldDrafts((current) => ({ ...current, [field.field_id]: event.target.value }))}
+            className="mt-3 w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"
+          >
+            {field.choices.map((choice) => (
+              <option key={choice.value} value={choice.value} className="bg-slate-900">
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={value}
+            type="number"
+            min={field.min ?? undefined}
+            max={field.max ?? undefined}
+            step={field.step ?? "any"}
+            onChange={(event) => setFieldDrafts((current) => ({ ...current, [field.field_id]: event.target.value }))}
+            className="mt-3 w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"
+          />
+        )}
+
+        <p className="mt-3 text-sm text-slate-200">{field.short_help}</p>
+        <p className="mt-2 text-xs leading-6 text-slate-400">{field.why_it_matters}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {field.affects.map((item) => (
+            <span
+              key={`${field.field_id}-${item}`}
+              className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-300"
+            >
+              {item.replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+        {field.tradeoffs[0] ? <p className="mt-3 text-xs leading-6 text-slate-500">{field.tradeoffs[0]}</p> : null}
+      </div>
+    );
+  };
 
   return (
     <main className="min-h-screen px-4 py-4 lg:px-6 lg:py-6">
@@ -231,7 +349,7 @@ export function BuildPlanner() {
           </p>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[430px_minmax(0,1.02fr)_minmax(0,0.98fr)]">
+        <div className="grid gap-4 xl:grid-cols-[520px_minmax(0,1.02fr)_minmax(0,0.98fr)]">
           <aside className="panel rounded-[28px] p-5 lg:p-6">
             <div className="flex items-start justify-between">
               <div>
@@ -246,12 +364,31 @@ export function BuildPlanner() {
 
             <div className="mt-5 space-y-4">
               <div className="grid gap-3">
-                <select value={trimId} onChange={(event) => { setTrimId(event.target.value); void createBuild.mutateAsync({ trim_id: event.target.value, scenario_name: build?.active_scenario ?? "daily" }); }} className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none">
-                  {(vehiclesQuery.data?.items ?? []).map((vehicle) => <option key={vehicle.trim_id} value={vehicle.trim_id} className="bg-slate-900">{vehicle.label}</option>)}
+                <select
+                  value={trimId}
+                  onChange={(event) => {
+                    setTrimId(event.target.value);
+                    void createBuild.mutateAsync({ trim_id: event.target.value, scenario_name: build?.active_scenario ?? "daily" });
+                  }}
+                  className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none"
+                >
+                  {(vehiclesQuery.data?.items ?? []).map((vehicle) => (
+                    <option key={vehicle.trim_id} value={vehicle.trim_id} className="bg-slate-900">
+                      {vehicle.label}
+                    </option>
+                  ))}
                 </select>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <select value={build?.active_scenario ?? "daily"} onChange={(event) => void patchAssembly.mutateAsync({ scenario_name: event.target.value })} className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none">
-                    {SCENARIOS.map(([value, label]) => <option key={value} value={value} className="bg-slate-900">{label}</option>)}
+                  <select
+                    value={build?.active_scenario ?? "daily"}
+                    onChange={(event) => void patchAssembly.mutateAsync({ scenario_name: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"
+                  >
+                    {SCENARIOS.map(([value, label]) => (
+                      <option key={value} value={value} className="bg-slate-900">
+                        {label}
+                      </option>
+                    ))}
                   </select>
                   <input value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="Budget" className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
                 </div>
@@ -259,34 +396,54 @@ export function BuildPlanner() {
                   <input value={targetHp} onChange={(event) => setTargetHp(event.target.value)} placeholder="Target HP" className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
                   <input value={maxWeight} onChange={(event) => setMaxWeight(event.target.value)} placeholder="Max weight" className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
                 </div>
-                <button type="button" onClick={() => void patchAssembly.mutateAsync({ target_metrics: { budget_max: budget ? Number(budget) : null, hp_min: targetHp ? Number(targetHp) : null, weight_max_lb: maxWeight ? Number(maxWeight) : null } })} className="chip chip-active w-full rounded-2xl px-4 py-3 text-sm">Apply Targets</button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void patchAssembly.mutateAsync({
+                      target_metrics: {
+                        budget_max: budget ? Number(budget) : null,
+                        hp_min: targetHp ? Number(targetHp) : null,
+                        weight_max_lb: maxWeight ? Number(maxWeight) : null
+                      }
+                    })
+                  }
+                  className="chip chip-active w-full rounded-2xl px-4 py-3 text-sm"
+                >
+                  Apply Targets
+                </button>
               </div>
 
               <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
-                <p className="mb-3 font-display text-xs uppercase tracking-[0.2em] text-slate-400">Engine Tuning</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input value={bore} onChange={(event) => setBore(event.target.value)} placeholder="Bore" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <input value={stroke} onChange={(event) => setStroke(event.target.value)} placeholder="Stroke" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <input value={compression} onChange={(event) => setCompression(event.target.value)} placeholder="Compression" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <input value={boost} onChange={(event) => setBoost(event.target.value)} placeholder="Boost PSI" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <input value={revLimit} onChange={(event) => setRevLimit(event.target.value)} placeholder="Rev limit" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <select value={cam} onChange={(event) => setCam(event.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="cam_street" className="bg-slate-900">Cam Street</option><option value="cam_balanced" className="bg-slate-900">Cam Balanced</option><option value="cam_aggressive" className="bg-slate-900">Cam Aggressive</option></select>
-                  <select value={headFlow} onChange={(event) => setHeadFlow(event.target.value as typeof headFlow)} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="stock" className="bg-slate-900">Head Stock</option><option value="street" className="bg-slate-900">Head Street</option><option value="race" className="bg-slate-900">Head Race</option></select>
-                  <select value={induction} onChange={(event) => setInduction(event.target.value as typeof induction)} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="na" className="bg-slate-900">NA</option><option value="turbo" className="bg-slate-900">Turbo</option><option value="supercharger" className="bg-slate-900">Supercharger</option></select>
-                  <select value={fuel} onChange={(event) => setFuel(event.target.value as typeof fuel)} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="91_octane" className="bg-slate-900">91</option><option value="93_octane" className="bg-slate-900">93</option><option value="e85" className="bg-slate-900">E85</option></select>
-                  <select value={tuneBias} onChange={(event) => setTuneBias(event.target.value as typeof tuneBias)} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="comfort" className="bg-slate-900">Comfort</option><option value="balanced" className="bg-slate-900">Balanced</option><option value="aggressive" className="bg-slate-900">Aggressive</option></select>
-                  <button type="button" onClick={() => void patchAssembly.mutateAsync({ engine_patch: { bore_mm: Number(bore), stroke_mm: Number(stroke), compression_ratio: Number(compression), boost_psi: Number(boost), rev_limit_rpm: Number(revLimit), cam_profile_id: cam, head_flow_stage: headFlow, induction_type: induction, fuel_type: fuel, tune_bias: tuneBias } })} className="sm:col-span-2 chip chip-active rounded-2xl px-4 py-3 text-sm">Apply Engine Spec</button>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">Engine Editor</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      Every input explains what it changes, why it matters, and which part of the simulation it touches.
+                    </p>
+                  </div>
+                  <span className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${calibrationTone(engineQuery.data?.calibration_state)}`}>
+                    {calibrationLabel(engineQuery.data?.calibration_state)}
+                  </span>
                 </div>
-              </div>
 
-              <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
-                <p className="mb-3 font-display text-xs uppercase tracking-[0.2em] text-slate-400">Drivetrain</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input value={finalDrive} onChange={(event) => setFinalDrive(event.target.value)} placeholder="Final drive" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <input value={loss} onChange={(event) => setLoss(event.target.value)} placeholder="Loss factor" className="rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none" />
-                  <select value={diffBias} onChange={(event) => setDiffBias(event.target.value as typeof diffBias)} className="sm:col-span-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-white outline-none"><option value="street_lsd" className="bg-slate-900">Street LSD</option><option value="track_lsd" className="bg-slate-900">Track LSD</option><option value="open" className="bg-slate-900">Open</option><option value="torsen" className="bg-slate-900">Torsen</option></select>
-                  <button type="button" onClick={() => void patchAssembly.mutateAsync({ drivetrain_patch: { final_drive_ratio: Number(finalDrive), driveline_loss_factor: Number(loss), differential_bias: diffBias } })} className="sm:col-span-2 chip chip-active rounded-2xl px-4 py-3 text-sm">Apply Drivetrain</button>
-                </div>
+                {engineEditorQuery.data ? (
+                  <div className="mt-4 space-y-4">
+                    {engineEditorQuery.data.groups.map((group) => (
+                      <div key={group.group_id} className="rounded-[24px] border border-white/8 bg-black/10 p-4">
+                        <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-300">{group.label}</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">{group.description}</p>
+                        <div className="mt-4 grid gap-3">{group.fields.map(renderField)}</div>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => void applyEditorPatch()} className="chip chip-active w-full rounded-2xl px-4 py-3 text-sm">
+                      Apply Engine + Drivetrain
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-white/8 bg-black/10 px-4 py-3 text-sm text-slate-400">
+                    Engine editor metadata will appear once the build is ready.
+                  </div>
+                )}
               </div>
 
               <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
@@ -316,7 +473,13 @@ export function BuildPlanner() {
                                 </div>
                                 <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${badgeTone(part.visualization_mode)}`}>{badgeLabel(part.visualization_mode)}</span>
                               </div>
-                              <div className="mt-2 flex flex-wrap gap-2">{summarizePerformance(part).map((item) => <span key={`${part.part_id}-${item}`} className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-300">{item}</span>)}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {summarizePerformance(part).map((item) => (
+                                  <span key={`${part.part_id}-${item}`} className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-300">
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
                             </button>
                           );
                         })}
@@ -332,7 +495,15 @@ export function BuildPlanner() {
                   {(build?.selections ?? []).filter((selection) => selection.selected_part_id).map((selection) => {
                     const part = partById[String(selection.selected_part_id)];
                     if (!part) return null;
-                    return <div key={selection.subsystem} className="rounded-2xl border border-white/8 bg-black/10 px-3 py-2 text-sm text-slate-300"><div className="flex items-center justify-between gap-3"><span className="font-display text-[11px] uppercase tracking-[0.18em] text-slate-400">{selection.subsystem.replace(/_/g, " ")}</span><span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${badgeTone(part.visualization_mode)}`}>{badgeLabel(part.visualization_mode)}</span></div><p className="mt-1 text-white">{part.label}</p></div>;
+                    return (
+                      <div key={selection.subsystem} className="rounded-2xl border border-white/8 bg-black/10 px-3 py-2 text-sm text-slate-300">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-display text-[11px] uppercase tracking-[0.18em] text-slate-400">{selection.subsystem.replace(/_/g, " ")}</span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${badgeTone(part.visualization_mode)}`}>{badgeLabel(part.visualization_mode)}</span>
+                        </div>
+                        <p className="mt-1 text-white">{part.label}</p>
+                      </div>
+                    );
                   })}
                 </div>
               </div>
@@ -342,13 +513,22 @@ export function BuildPlanner() {
           <section className="space-y-4">
             <BuildViewport scene={sceneQuery.data} loading={sceneQuery.isLoading} />
             <div className="grid gap-4 md:grid-cols-4">
-              {[["Peak HP", currentMetrics?.peak_hp ? currentMetrics.peak_hp.toFixed(0) : "--"], ["0-60", currentMetrics?.zero_to_sixty_s ? `${currentMetrics.zero_to_sixty_s.toFixed(1)} s` : "--"], ["Renderable", sceneQuery.data?.summary.renderable_count ?? 0], ["Scene", sceneCoverage.toUpperCase()]].map(([label, value]) => <div key={String(label)} className="panel rounded-[24px] p-4"><p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p><p className="mt-2 font-display text-3xl text-white">{value}</p></div>)}
+              {[["Peak HP", currentMetrics?.peak_hp ? currentMetrics.peak_hp.toFixed(0) : "--"], ["0-60", currentMetrics?.zero_to_sixty_s ? `${currentMetrics.zero_to_sixty_s.toFixed(1)} s` : "--"], ["Renderable", sceneQuery.data?.summary.renderable_count ?? 0], ["Scene", sceneCoverage.toUpperCase()]].map(([label, value]) => (
+                <div key={String(label)} className="panel rounded-[24px] p-4">
+                  <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
+                  <p className="mt-2 font-display text-3xl text-white">{value}</p>
+                </div>
+              ))}
             </div>
           </section>
 
           <section className="panel rounded-[28px] p-5 lg:p-6">
             <div className="mb-4 flex flex-wrap gap-2">
-              {TABS.map((item) => <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-4 py-2 font-display text-xs uppercase tracking-[0.22em] ${tab === item ? "chip chip-active" : "chip text-slate-300"}`}>{item}</button>)}
+              {TABS.map((item) => (
+                <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-4 py-2 font-display text-xs uppercase tracking-[0.22em] ${tab === item ? "chip chip-active" : "chip text-slate-300"}`}>
+                  {item}
+                </button>
+              ))}
             </div>
 
             {tab === "validate" ? (
@@ -368,19 +548,52 @@ export function BuildPlanner() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  {(validationQuery.data?.support_notes ?? []).map((note) => <div key={note} className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">{note}</div>)}
+                  {(validationQuery.data?.support_notes ?? []).map((note) => (
+                    <div key={note} className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-slate-300">
+                      {note}
+                    </div>
+                  ))}
                 </div>
                 <div className="space-y-3">
-                  {(validationQuery.data?.validation.findings ?? []).map((finding) => <div key={`${finding.finding_id}-${finding.subsystem}`} className={`rounded-2xl border px-3 py-3 text-sm ${finding.severity === "BLOCKER" ? "border-red-300/25 bg-red-300/10 text-red-100" : "border-amber-300/20 bg-amber-300/10 text-amber-100"}`}><p className="font-display text-xs uppercase tracking-[0.18em]">{finding.title}</p><p className="mt-1 leading-6">{finding.detail}</p></div>)}
+                  {(validationQuery.data?.validation.findings ?? []).map((finding) => (
+                    <div key={`${finding.finding_id}-${finding.subsystem}`} className={`rounded-2xl border px-3 py-3 text-sm ${finding.severity === "BLOCKER" ? "border-red-300/25 bg-red-300/10 text-red-100" : "border-amber-300/20 bg-amber-300/10 text-amber-100"}`}>
+                      <p className="font-display text-xs uppercase tracking-[0.18em]">{finding.title}</p>
+                      <p className="mt-1 leading-6">{finding.detail}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}
 
-            {tab === "dyno" ? <DynoChart dyno={dyno} /> : null}
+            {tab === "dyno" ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    ["Derived displacement", dyno?.derived_values?.displacement_l ? `${Number(dyno.derived_values.displacement_l).toFixed(2)} L` : "--"],
+                    ["Effective boost", dyno?.derived_values?.effective_boost_psi_peak ? `${Number(dyno.derived_values.effective_boost_psi_peak).toFixed(1)} psi` : "0.0 psi"],
+                    ["Charge temp", dyno?.derived_values?.charge_temp_c_peak ? `${Number(dyno.derived_values.charge_temp_c_peak).toFixed(1)} C` : "--"],
+                    ["Fuel limit", dyno?.derived_values?.fuel_limit_factor_min ? String(dyno.derived_values.fuel_limit_factor_min) : "--"],
+                    ["Knock limit", dyno?.derived_values?.knock_limit_factor_min ? String(dyno.derived_values.knock_limit_factor_min) : "--"],
+                    ["Cooling status", thermalPayload?.thermal_headroom ? `Headroom ${String(thermalPayload.thermal_headroom)}` : "--"]
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+                      <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
+                      <p className="mt-2 font-display text-2xl text-white">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <DynoChart dyno={dyno} calibrationState={engineQuery.data?.calibration_state} thermalPayload={thermalPayload} />
+              </div>
+            ) : null}
 
             {tab === "vehicle" && currentMetrics ? (
               <div className="grid gap-3 md:grid-cols-2">
-                {[["Weight", `${currentMetrics.curb_weight_lb} lb`], ["Power / Weight", `${currentMetrics.power_to_weight_hp_per_ton} hp/ton`], ["Top Speed", `${currentMetrics.top_speed_mph} mph`], ["Quarter Mile", `${currentMetrics.quarter_mile_s} s`], ["Braking", `${currentMetrics.braking_distance_ft} ft`], ["Grip", `${currentMetrics.lateral_grip_g} g`]].map(([label, value]) => <div key={String(label)} className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4"><p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p><p className="mt-2 font-display text-3xl text-white">{value}</p></div>)}
+                {[["Weight", `${currentMetrics.curb_weight_lb} lb`], ["Power / Weight", `${currentMetrics.power_to_weight_hp_per_ton} hp/ton`], ["Top Speed", `${currentMetrics.top_speed_mph} mph`], ["Quarter Mile", `${currentMetrics.quarter_mile_s} s`], ["Braking", `${currentMetrics.braking_distance_ft} ft`], ["Grip", `${currentMetrics.lateral_grip_g} g`]].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+                    <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
+                    <p className="mt-2 font-display text-3xl text-white">{value}</p>
+                  </div>
+                ))}
               </div>
             ) : null}
 
@@ -391,10 +604,22 @@ export function BuildPlanner() {
                     <p className="font-display text-xs uppercase tracking-[0.2em] text-slate-400">Scenario Score</p>
                     <p className="mt-2 font-display text-4xl text-white">{handling.result.score}</p>
                   </div>
-                  {handling.result.strengths.map((item) => <div key={item} className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-100">{item}</div>)}
-                  {handling.result.penalties.map((item) => <div key={item} className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">{item}</div>)}
+                  {handling.result.strengths.map((item) => (
+                    <div key={item} className="rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-100">
+                      {item}
+                    </div>
+                  ))}
+                  {handling.result.penalties.map((item) => (
+                    <div key={item} className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+                      {item}
+                    </div>
+                  ))}
                 </div>
-              ) : <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">Handling simulation will appear once the build is ready.</div>
+              ) : (
+                <div className="rounded-[24px] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">
+                  Handling simulation will appear once the build is ready.
+                </div>
+              )
             ) : null}
           </section>
         </div>

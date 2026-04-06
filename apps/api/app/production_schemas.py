@@ -280,6 +280,52 @@ class BuildSceneResponse(StrictModel):
     summary: SceneSummary = Field(default_factory=SceneSummary)
 
 
+class EngineEditorChoice(StrictModel):
+    value: str
+    label: str
+
+
+class EngineEditorFieldDefinition(StrictModel):
+    field_id: str
+    label: str
+    input_kind: Literal["number", "select"]
+    unit: str | None = None
+    current_value: Any
+    default_value: Any
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    short_help: str
+    why_it_matters: str
+    affects: list[str] = Field(default_factory=list)
+    tradeoffs: list[str] = Field(default_factory=list)
+    warning_thresholds: dict[str, Any] = Field(default_factory=dict)
+    source: str
+    choices: list[EngineEditorChoice] = Field(default_factory=list)
+
+
+class EngineEditorGroup(StrictModel):
+    group_id: Literal[
+        "bottom_end",
+        "head_and_cams",
+        "induction_and_boost",
+        "fuel_and_ignition",
+        "exhaust",
+        "cooling_and_ambient",
+        "drivetrain",
+    ]
+    label: str
+    description: str
+    fields: list[EngineEditorFieldDefinition] = Field(default_factory=list)
+
+
+class BuildEngineEditorResponse(StrictModel):
+    build_id: str
+    build_hash: str
+    source_mode: CatalogDataMode = "seed"
+    groups: list[EngineEditorGroup] = Field(default_factory=list)
+
+
 class SimulationResponse(StrictModel):
     build_id: str
     build_hash: str

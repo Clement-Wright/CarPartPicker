@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
     searchVehiclesV1: vi.fn(),
     createBuildV1: vi.fn(),
     getBuildV1: vi.fn(),
+    getEngineEditorV1: vi.fn(),
     searchPartsV1: vi.fn(),
     validateBuildV1: vi.fn(),
     getSceneV1: vi.fn(),
@@ -118,13 +119,27 @@ const build = {
     bore_mm: 94,
     stroke_mm: 86,
     compression_ratio: 12.5,
+    rod_length_mm: 129.9,
     valve_train: { label: "Factory", head_flow_stage: "stock", valves_per_cylinder: 4, variable_valve_timing: true },
     cam_profile: { profile_id: "cam_street", label: "Street" },
+    intake_cam_duration_deg: 248,
+    exhaust_cam_duration_deg: 244,
+    intake_lift_mm: 10.6,
+    exhaust_lift_mm: 10.2,
+    lobe_separation_deg: 113,
     induction: { type: "na", boost_psi: 0, intercooler_required: false },
+    compressor_efficiency: 0.72,
+    intercooler_effectiveness: 0.78,
     fuel: { fuel_type: "93_octane", injector_scale: "stock", pump_scale: "stock" },
+    target_lambda: 0.86,
+    ignition_advance_bias_deg: 0,
     exhaust: { exhaust_style: "stock", flow_bias: 0, noise_bias: 0 },
+    exhaust_backpressure_factor: 1,
     tune_bias: "comfort",
     rev_limit_rpm: 7500,
+    radiator_effectiveness: 0.85,
+    ambient_temp_c: 20,
+    altitude_m: 0,
     notes: []
   },
   drivetrain_config: {
@@ -244,6 +259,89 @@ const parts = [
   }
 ];
 
+const engineEditor = {
+  build_id: "build-1",
+  build_hash: "hash-1",
+  source_mode: "licensed",
+  groups: [
+    {
+      group_id: "bottom_end",
+      label: "Bottom End",
+      description: "Block dimensions and compression define the base displacement and mechanical stress envelope.",
+      fields: [
+        {
+          field_id: "bore_mm",
+          label: "Bore",
+          input_kind: "number",
+          unit: "mm",
+          current_value: 94,
+          default_value: 94,
+          min: 85,
+          max: 100,
+          step: 0.1,
+          short_help: "Cylinder bore diameter.",
+          why_it_matters: "Bore directly changes displacement and the model's breathing area.",
+          affects: ["displacement", "torque", "airflow"],
+          tradeoffs: ["More bore raises piston area but reduces wall thickness margin."],
+          warning_thresholds: { max_safe: 98 },
+          source: "simulation_dataset",
+          choices: []
+        }
+      ]
+    },
+    {
+      group_id: "fuel_and_ignition",
+      label: "Fuel and Ignition",
+      description: "Fuel quality, lambda, and timing bias change combustion efficiency and knock headroom.",
+      fields: [
+        {
+          field_id: "target_lambda",
+          label: "Target Lambda",
+          input_kind: "number",
+          unit: null,
+          current_value: 0.86,
+          default_value: 0.86,
+          min: 0.72,
+          max: 1.0,
+          step: 0.01,
+          short_help: "Target mixture richness under load.",
+          why_it_matters: "This changes power, charge temperature, and fuel-system demand.",
+          affects: ["power", "fuel_limit", "charge_temp"],
+          tradeoffs: ["Richer mixtures cool the charge but consume more fuel."],
+          warning_thresholds: { rich_limit: 0.78, lean_limit: 0.93 },
+          source: "simulation_dataset",
+          choices: []
+        }
+      ]
+    },
+    {
+      group_id: "drivetrain",
+      label: "Drivetrain",
+      description: "Gearing and driveline loss convert engine torque into wheel force and speed.",
+      fields: [
+        {
+          field_id: "final_drive_ratio",
+          label: "Final Drive",
+          input_kind: "number",
+          unit: ":1",
+          current_value: 4.1,
+          default_value: 4.1,
+          min: 3.0,
+          max: 5.5,
+          step: 0.01,
+          short_help: "Overall axle reduction ratio.",
+          why_it_matters: "Final drive changes acceleration, shift spacing, and top-speed potential.",
+          affects: ["wheel_force", "0_60", "top_speed"],
+          tradeoffs: ["Shorter gearing feels stronger but caps speed earlier."],
+          warning_thresholds: { short_drive: 4.6 },
+          source: "simulation_dataset",
+          choices: []
+        }
+      ]
+    }
+  ]
+};
+
 function renderPlanner() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -274,6 +372,7 @@ beforeEach(() => {
   } as never);
   vi.mocked(api.createBuildV1).mockResolvedValue(build as never);
   vi.mocked(api.getBuildV1).mockResolvedValue(build as never);
+  vi.mocked(api.getEngineEditorV1).mockResolvedValue(engineEditor as never);
   vi.mocked(api.searchPartsV1).mockResolvedValue({ items: parts, total: parts.length, source_mode: "seed" } as never);
   vi.mocked(api.validateBuildV1).mockResolvedValue({
     build_id: "build-1",
@@ -308,9 +407,22 @@ beforeEach(() => {
         build_id: "build-1",
         build_hash: "hash-1",
         mode,
-        source_mode: "seed",
-        calibration_state: "seed_heuristic",
-        payload: { build_id: "build-1", build_hash: "hash-1", engine_family_id: "fa24d_native", spec_hash: "spec-1", dyno: { peak_hp: 250, peak_torque_lbft: 195, shift_rpm: 7300, engine_curve: [], gear_curves: [] }, computed_at: "2026-04-05T00:00:00Z" }
+        source_mode: "licensed",
+        calibration_state: "calibrated",
+        payload: {
+          build_id: "build-1",
+          build_hash: "hash-1",
+          engine_family_id: "fa24d_native",
+          spec_hash: "spec-1",
+          dyno: { peak_hp: 250, peak_torque_lbft: 195, shift_rpm: 7300, engine_curve: [], gear_curves: [] },
+          computed_at: "2026-04-05T00:00:00Z",
+          model_version: "mean_value_v1",
+          derived_values: { displacement_l: 2.387, effective_boost_psi_peak: 0, charge_temp_c_peak: 32, stock_peak_hp_delta: 22, stock_peak_torque_delta: 11 },
+          limiting_factors: [],
+          warnings: [{ code: "charge_temp_high", severity: "warning", message: "Charge temperature is elevated." }],
+          assumptions: [],
+          explanation_summary: "Calibrated imported engine model."
+        }
       } as never;
     }
     if (mode === "vehicle") {
@@ -318,17 +430,27 @@ beforeEach(() => {
         build_id: "build-1",
         build_hash: "hash-1",
         mode,
-        source_mode: "seed",
-        calibration_state: "seed_heuristic",
-        payload: { metrics: { peak_hp: 250, peak_torque_lbft: 195, curb_weight_lb: 2810, upgrade_cost_usd: 600, redline_rpm: 7500, power_to_weight_hp_per_ton: 177.9, top_speed_mph: 142, zero_to_sixty_s: 5.7, quarter_mile_s: 13.9, braking_distance_ft: 110, lateral_grip_g: 0.99, thermal_headroom: 0.7, driveline_stress: 0.1, comfort_index: 0.74, fabrication_index: 0, budget_remaining_usd: 4400 } }
+        source_mode: "licensed",
+        calibration_state: "calibrated",
+        payload: { metrics: { peak_hp: 250, peak_torque_lbft: 195, curb_weight_lb: 2810, upgrade_cost_usd: 600, redline_rpm: 7500, power_to_weight_hp_per_ton: 177.9, top_speed_mph: 142, zero_to_sixty_s: 5.7, quarter_mile_s: 13.9, braking_distance_ft: 110, lateral_grip_g: 0.99, thermal_headroom: 0.7, driveline_stress: 0.1, comfort_index: 0.74, fabrication_index: 0, budget_remaining_usd: 4400 }, engine_spec_hash: "spec-1", model_version: "mean_value_v1" }
+      } as never;
+    }
+    if (mode === "thermal") {
+      return {
+        build_id: "build-1",
+        build_hash: "hash-1",
+        mode,
+        source_mode: "licensed",
+        calibration_state: "calibrated",
+        payload: { engine_spec_hash: "spec-1", charge_temp_c: 32, effective_boost_psi: 0, cooling_capacity_kw: 88, cooling_demand_kw: 72, coolant_headroom_ratio: 1.0, thermal_headroom: 0.7, power_derated_for_temperature: false, warnings: [], limiting_factors: [], explanation_summary: "Thermal state remains healthy." }
       } as never;
     }
     return {
       build_id: "build-1",
       build_hash: "hash-1",
       mode,
-      source_mode: "seed",
-      calibration_state: "seed_heuristic",
+      source_mode: "licensed",
+      calibration_state: "calibration_required",
       payload: { result: { scenario_name: "daily", score: 78, passing: true, strengths: ["Ride remains daily-usable."], penalties: ["None"], notes: [] } }
     } as never;
   });
@@ -354,6 +476,9 @@ describe("BuildPlanner", () => {
   it("shows validation findings and simulation tabs through v1 endpoints", async () => {
     renderPlanner();
     expect(await screen.findByText("Wheel clearance failure")).toBeInTheDocument();
+    expect(await screen.findByText("Bottom End")).toBeInTheDocument();
+    expect(screen.getByText("Cylinder bore diameter.")).toBeInTheDocument();
+    expect(screen.getByText("Calibrated")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "dyno" })[0]);
     expect(await screen.findByText("dyno-chart")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "handling" })[0]);

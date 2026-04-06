@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.production_schemas import (
     BuildAssemblyPatchRequest,
+    BuildEngineEditorResponse,
     BuildSceneResponse,
     BuildValidationReport,
     CatalogSourceContractsResponse,
@@ -15,7 +16,12 @@ from app.production_schemas import (
     VehicleSearchResponse,
 )
 from app.schemas import BuildState, CreateBuildRequest, PatchBuildPartsRequest
-from app.services.assembly_graph_service import build_scene_response, build_validation_report, simulate_build
+from app.services.assembly_graph_service import (
+    build_engine_editor,
+    build_scene_response,
+    build_validation_report,
+    simulate_build,
+)
 from app.services.build_state_service import create_build, get_build, patch_build, patch_drivetrain, patch_engine
 from app.services.production_mapper_service import (
     catalog_source_contracts,
@@ -82,6 +88,11 @@ def create_build_v1_endpoint(request: CreateBuildRequest) -> BuildState:
 @router.get("/builds/{build_id}", response_model=BuildState)
 def get_build_v1_endpoint(build_id: str) -> BuildState:
     return get_build(build_id)
+
+
+@router.get("/builds/{build_id}/engine-editor", response_model=BuildEngineEditorResponse)
+def engine_editor_v1_endpoint(build_id: str) -> BuildEngineEditorResponse:
+    return build_engine_editor(get_build(build_id))
 
 
 @router.patch("/builds/{build_id}/assembly", response_model=BuildState)

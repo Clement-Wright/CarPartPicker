@@ -21,15 +21,17 @@ from app.production_schemas import (
     SubsystemFitmentOutcome,
     VisualizationSummary,
 )
-from app.schemas import BuildState, RenderSceneObject
+from app.schemas import BuildDynoSnapshot, BuildState, RenderSceneObject
 from app.services.build_helpers import active_engine_family, selected_parts
 from app.services.compatibility_engine_service import build_compatibility_diagnostics
 from app.services.dyno_service import build_dyno_snapshot
+from app.services.engine_editor_service import build_engine_editor_response
 from app.services.metrics_service import build_metric_snapshot
 from app.services.production_mapper_service import VisualizationProfile, describe_part_visualization
 from app.services.render_config_service import build_render_config
 from app.services.seed_repository import get_repository
 from app.services.scenario_service import build_scenario_snapshot
+from app.services.simulation_dataset_service import calibration_state_for_mode
 from app.services.validation_service import build_validation_snapshot
 from app.services.vehicle_metrics_service import build_vehicle_metric_snapshot
 
@@ -424,31 +426,136 @@ def build_scene_response(build: BuildState) -> BuildSceneResponse:
     )
 
 
-def simulate_build(build: BuildState, mode: str) -> SimulationResponse:
+def build_engine_editor(build: BuildState):
+    return build_engine_editor_response(build)
+
+
+def _simulation_source_mode(build: BuildState) -> str:
     repository = get_repository()
+    return "licensed" if repository.get_vehicle_record(build.vehicle.trim_id) is not None else "seed"
+
+
+def _build_thermal_payload(build: BuildState) -> dict[str, object]:
+    engine_snapshot = build_dyno_snapshot(build)
+    vehicle_snapshot = build_vehicle_metric_snapshot(build)
+    derived = engine_snapshot.derived_values
+    cooling_factor = float(derived.get("cooling_limit_factor_min", 1.0))
+    charge_temp_factor = float(derived.get("charge_temp_limit_factor_min", 1.0))
+
+    warnings = list(engine_snapshot.warnings)
+    if cooling_factor < 0.94 and not any(item.get("code") == "coolant_headroom_low" for item in warnings):
+        warnings.append(
+            {
+                "code": "coolant_headroom_low",
+                "severity": "warning",
+                "message": "Cooling demand is close to or above the calibrated rejection threshold.",
+            }
+        )
+    if charge_temp_factor < 0.97 and not any(item.get("code") == "charge_temp_high" for item in warnings):
+        warnings.append(
+            {
+                "code": "charge_temp_high",
+                "severity": "warning",
+                "message": "Charge temperature is elevated enough to threaten repeatable power.",
+            }
+        )
+    if min(cooling_factor, charge_temp_factor) < 0.98:
+        warnings.append(
+            {
+                "code": "power_derated_for_temperature",
+                "severity": "warning",
+                "message": "The engine model is applying a temperature-based power derate.",
+            }
+        )
+
+    return {
+        "engine_spec_hash": engine_snapshot.spec_hash,
+        "model_version": engine_snapshot.model_version,
+        "charge_temp_c": derived.get("charge_temp_c_peak"),
+        "effective_boost_psi": derived.get("effective_boost_psi_peak"),
+        "cooling_capacity_kw": derived.get("cooling_capacity_kw"),
+        "cooling_demand_kw": derived.get("cooling_demand_kw_peak"),
+        "coolant_headroom_ratio": round(cooling_factor, 3),
+        "thermal_headroom": vehicle_snapshot.metrics.thermal_headroom,
+        "power_derated_for_temperature": min(cooling_factor, charge_temp_factor) < 0.98,
+        "warnings": warnings,
+        "limiting_factors": engine_snapshot.limiting_factors,
+        "explanation_summary": engine_snapshot.explanation_summary,
+    }
+
+
+def _simulation_calibration_state(build: BuildState, *, mode: str, source_mode: str, engine_snapshot: BuildDynoSnapshot | None = None) -> str:
+    if source_mode == "seed":
+        return "seed_heuristic"
+    if mode not in {"engine", "vehicle", "thermal"}:
+        return "calibration_required"
+    if engine_snapshot is None:
+        return calibration_state_for_mode(
+            source_mode=source_mode,
+            vehicle_id=build.vehicle.trim_id,
+            engine_family_id=build.engine_build_spec.engine_family_id,
+            drivetrain_config_id=build.drivetrain_config.config_id,
+            mode=mode,
+        )
+    return "calibrated" if engine_snapshot.derived_values.get("reference_calibrated") else "calibration_required"
+
+
+def simulate_build(build: BuildState, mode: str) -> SimulationResponse:
+    source_mode = _simulation_source_mode(build)
+    calibration_state = calibration_state_for_mode(
+        source_mode=source_mode,
+        vehicle_id=build.vehicle.trim_id,
+        engine_family_id=build.engine_build_spec.engine_family_id,
+        drivetrain_config_id=build.drivetrain_config.config_id,
+        mode=mode,
+    )
+
     if mode == "engine":
         snapshot = build_dyno_snapshot(build)
+        calibration_state = _simulation_calibration_state(
+            build,
+            mode=mode,
+            source_mode=source_mode,
+            engine_snapshot=snapshot,
+        )
         payload = snapshot.model_dump()
     elif mode == "vehicle":
         snapshot = build_vehicle_metric_snapshot(build)
+        engine_snapshot = build_dyno_snapshot(build)
+        calibration_state = _simulation_calibration_state(
+            build,
+            mode=mode,
+            source_mode=source_mode,
+            engine_snapshot=engine_snapshot,
+        )
         payload = snapshot.model_dump()
-    elif mode == "thermal":
-        snapshot = build_vehicle_metric_snapshot(build)
-        payload = {
-            "thermal_headroom": snapshot.metrics.thermal_headroom,
-            "driveline_stress": snapshot.metrics.driveline_stress,
-            "comfort_index": snapshot.metrics.comfort_index,
+        payload["engine_spec_hash"] = engine_snapshot.spec_hash
+        payload["model_version"] = engine_snapshot.model_version
+        payload["integration_summary"] = {
+            "launch_controlled_by": "traction_limit" if snapshot.metrics.zero_to_sixty_s < 5.2 else "available_wheel_force",
+            "top_speed_controlled_by": "drag_balance",
         }
+    elif mode == "thermal":
+        engine_snapshot = build_dyno_snapshot(build)
+        calibration_state = _simulation_calibration_state(
+            build,
+            mode=mode,
+            source_mode=source_mode,
+            engine_snapshot=engine_snapshot,
+        )
+        payload = _build_thermal_payload(build)
     elif mode == "braking":
         snapshot = build_metric_snapshot(build)
         payload = {
             "braking_distance_ft": snapshot.metrics.braking_distance_ft,
             "lateral_grip_g": snapshot.metrics.lateral_grip_g,
             "upgrade_cost_usd": snapshot.metrics.upgrade_cost_usd,
+            "estimate_message": "Braking remains a lower-fidelity estimate until dedicated brake and tire calibration data is added.",
         }
     elif mode == "handling":
         snapshot = build_scenario_snapshot(build, scenario_name=build.active_scenario)
         payload = snapshot.model_dump()
+        payload["estimate_message"] = "Handling remains a scenario-weighted estimate until a calibrated chassis model lands."
     else:
         raise ValueError(f"Unsupported simulation mode: {mode}")
 
@@ -456,6 +563,7 @@ def simulate_build(build: BuildState, mode: str) -> SimulationResponse:
         build_id=build.build_id,
         build_hash=build.computation.build_hash,
         mode=mode,
-        source_mode="licensed" if repository.get_vehicle_record(build.vehicle.trim_id) is not None else "seed",
+        source_mode=source_mode,  # type: ignore[arg-type]
+        calibration_state=calibration_state,  # type: ignore[arg-type]
         payload=payload,
     )

@@ -34,6 +34,7 @@ from app.services.catalog_seed import (
     TRIMS,
     VIN_CACHE,
 )
+from app.services.simulation_dataset_service import hydrate_engine_build_spec
 from app.services.catalog_store_service import get_catalog_store
 
 
@@ -78,10 +79,14 @@ class SeedCatalogRepository:
         return ENGINE_FAMILIES[engine_family_id]
 
     def get_default_engine_config(self, trim_id: str) -> EngineBuildSpec:
-        return ENGINE_CONFIGS[DEFAULT_ENGINE_BY_TRIM[trim_id]]
+        config = ENGINE_CONFIGS[DEFAULT_ENGINE_BY_TRIM[trim_id]]
+        family = self.get_engine_family(config.engine_family_id)
+        return hydrate_engine_build_spec(config, engine_family=family)
 
     def get_engine_config(self, config_id: str) -> EngineBuildSpec:
-        return ENGINE_CONFIGS[config_id]
+        config = ENGINE_CONFIGS[config_id]
+        family = self.get_engine_family(config.engine_family_id)
+        return hydrate_engine_build_spec(config, engine_family=family)
 
     def list_drivetrain_configs(self) -> list[DrivetrainConfig]:
         return list(DRIVETRAIN_CONFIGS.values())
@@ -304,7 +309,8 @@ class CatalogRepository:
     def get_engine_config(self, config_id: str) -> EngineBuildSpec:
         record = self._store.get_engine_config_record(config_id)
         if record is not None:
-            return record.engine_config
+            family = self.get_engine_family(record.engine_config.engine_family_id)
+            return hydrate_engine_build_spec(record.engine_config, engine_family=family)
         if self._store.list_engine_config_records():
             raise KeyError(config_id)
         return self._seed.get_engine_config(config_id)

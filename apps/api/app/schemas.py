@@ -354,13 +354,27 @@ class EngineBuildSpec(StrictModel):
     bore_mm: float
     stroke_mm: float
     compression_ratio: float
+    rod_length_mm: float = 128.0
     valve_train: ValveTrainSpec
     cam_profile: CamProfileSpec
+    intake_cam_duration_deg: float = 252.0
+    exhaust_cam_duration_deg: float = 248.0
+    intake_lift_mm: float = 10.4
+    exhaust_lift_mm: float = 10.0
+    lobe_separation_deg: float = 112.0
     induction: InductionSpec
+    compressor_efficiency: float = 0.72
+    intercooler_effectiveness: float = 0.78
     fuel: FuelSpec
+    target_lambda: float = 0.88
+    ignition_advance_bias_deg: float = 0.0
     exhaust: ExhaustSpec
+    exhaust_backpressure_factor: float = 1.0
     tune_bias: Literal["comfort", "balanced", "aggressive"] = "balanced"
     rev_limit_rpm: int
+    radiator_effectiveness: float = 0.85
+    ambient_temp_c: float = 20.0
+    altitude_m: float = 0.0
     notes: list[str] = Field(default_factory=list)
 
 
@@ -563,6 +577,12 @@ class EngineSimulationSnapshot(StrictModel):
     dyno: DynoResult
     computed_at: datetime
     provenance: FactProvenance
+    model_version: str = "dyno_lite_v1"
+    derived_values: dict[str, Any] = Field(default_factory=dict)
+    limiting_factors: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    explanation_summary: str = ""
 
 
 class BuildDynoSnapshot(EngineSimulationSnapshot):
@@ -749,18 +769,32 @@ class PatchEngineRequest(StrictModel):
     bore_mm: float | None = None
     stroke_mm: float | None = None
     compression_ratio: float | None = None
+    rod_length_mm: float | None = None
     head_flow_stage: Literal["stock", "street", "race"] | None = None
     valves_per_cylinder: int | None = None
     variable_valve_timing: bool | None = None
     cam_profile_id: str | None = None
+    intake_cam_duration_deg: float | None = None
+    exhaust_cam_duration_deg: float | None = None
+    intake_lift_mm: float | None = None
+    exhaust_lift_mm: float | None = None
+    lobe_separation_deg: float | None = None
     induction_type: Literal["na", "turbo", "supercharger"] | None = None
     boost_psi: float | None = None
+    compressor_efficiency: float | None = None
+    intercooler_effectiveness: float | None = None
     fuel_type: Literal["91_octane", "93_octane", "e85"] | None = None
     injector_scale: Literal["stock", "upgrade", "high_flow"] | None = None
     pump_scale: Literal["stock", "upgrade", "high_flow"] | None = None
+    target_lambda: float | None = None
+    ignition_advance_bias_deg: float | None = None
     exhaust_style: Literal["stock", "catback", "turbo_back", "equal_length"] | None = None
+    exhaust_backpressure_factor: float | None = None
     tune_bias: Literal["comfort", "balanced", "aggressive"] | None = None
     rev_limit_rpm: int | None = None
+    radiator_effectiveness: float | None = None
+    ambient_temp_c: float | None = None
+    altitude_m: float | None = None
 
 
 class PatchDrivetrainRequest(StrictModel):

@@ -226,6 +226,51 @@ export type V1SimulationResponse = {
   payload: Record<string, unknown>;
 };
 
+export type V1EngineEditorChoice = {
+  value: string;
+  label: string;
+};
+
+export type V1EngineEditorField = {
+  field_id: string;
+  label: string;
+  input_kind: "number" | "select";
+  unit?: string | null;
+  current_value: string | number | boolean | null;
+  default_value: string | number | boolean | null;
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  short_help: string;
+  why_it_matters: string;
+  affects: string[];
+  tradeoffs: string[];
+  warning_thresholds: Record<string, number | string | boolean | null>;
+  source: string;
+  choices: V1EngineEditorChoice[];
+};
+
+export type V1EngineEditorGroup = {
+  group_id:
+    | "bottom_end"
+    | "head_and_cams"
+    | "induction_and_boost"
+    | "fuel_and_ignition"
+    | "exhaust"
+    | "cooling_and_ambient"
+    | "drivetrain";
+  label: string;
+  description: string;
+  fields: V1EngineEditorField[];
+};
+
+export type V1EngineEditorResponse = {
+  build_id: string;
+  build_hash: string;
+  source_mode: "seed" | "licensed" | "verified";
+  groups: V1EngineEditorGroup[];
+};
+
 export type VehicleSummary = {
   trim_id: string;
   label: string;
@@ -366,6 +411,7 @@ export type EngineBuildSpec = {
   bore_mm: number;
   stroke_mm: number;
   compression_ratio: number;
+  rod_length_mm: number;
   valve_train: {
     label: string;
     head_flow_stage: "stock" | "street" | "race";
@@ -376,21 +422,36 @@ export type EngineBuildSpec = {
     profile_id: string;
     label: string;
   };
+  intake_cam_duration_deg: number;
+  exhaust_cam_duration_deg: number;
+  intake_lift_mm: number;
+  exhaust_lift_mm: number;
+  lobe_separation_deg: number;
   induction: {
     type: "na" | "turbo" | "supercharger";
     boost_psi: number;
     intercooler_required: boolean;
   };
+  compressor_efficiency: number;
+  intercooler_effectiveness: number;
   fuel: {
     fuel_type: "91_octane" | "93_octane" | "e85";
     injector_scale: "stock" | "upgrade" | "high_flow";
     pump_scale: "stock" | "upgrade" | "high_flow";
   };
+  target_lambda: number;
+  ignition_advance_bias_deg: number;
   exhaust: {
     exhaust_style: "stock" | "catback" | "turbo_back" | "equal_length";
+    flow_bias: number;
+    noise_bias: number;
   };
+  exhaust_backpressure_factor: number;
   tune_bias: "comfort" | "balanced" | "aggressive";
   rev_limit_rpm: number;
+  radiator_effectiveness: number;
+  ambient_temp_c: number;
+  altitude_m: number;
   notes: string[];
 };
 
@@ -545,6 +606,12 @@ export type BuildDynoSnapshot = {
     }>;
   };
   computed_at: string;
+  model_version?: string;
+  derived_values?: Record<string, number | string | boolean | null>;
+  limiting_factors?: Array<Record<string, number | string | boolean | null>>;
+  warnings?: Array<Record<string, number | string | boolean | null>>;
+  assumptions?: string[];
+  explanation_summary?: string;
 };
 
 export type BuildScenarioSnapshot = {

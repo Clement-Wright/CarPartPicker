@@ -19,6 +19,7 @@ from app.schemas import (
     PresetApplicationResponse,
 )
 from app.services.seed_repository import CatalogRepository, get_repository
+from app.services.simulation_dataset_service import default_engine_spec_updates
 from app.services.build_storage_service import get_build_store
 
 
@@ -183,6 +184,7 @@ def patch_engine(build_id: str, request: PatchEngineRequest, repository: Catalog
                 "rev_limit_rpm": family.base_redline_rpm,
             }
         )
+        engine_spec = engine_spec.model_copy(update=default_engine_spec_updates(engine_family=family))
 
     if request.label is not None:
         engine_spec.label = request.label
@@ -196,6 +198,8 @@ def patch_engine(build_id: str, request: PatchEngineRequest, repository: Catalog
         engine_spec.stroke_mm = request.stroke_mm
     if request.compression_ratio is not None:
         engine_spec.compression_ratio = request.compression_ratio
+    if request.rod_length_mm is not None:
+        engine_spec.rod_length_mm = request.rod_length_mm
     if request.head_flow_stage is not None:
         engine_spec.valve_train.head_flow_stage = request.head_flow_stage
     if request.valves_per_cylinder is not None:
@@ -206,22 +210,48 @@ def patch_engine(build_id: str, request: PatchEngineRequest, repository: Catalog
         from app.services.catalog_seed import CAM_PROFILES  # local import to avoid circular misuse
 
         engine_spec.cam_profile = CAM_PROFILES[request.cam_profile_id]
+    if request.intake_cam_duration_deg is not None:
+        engine_spec.intake_cam_duration_deg = request.intake_cam_duration_deg
+    if request.exhaust_cam_duration_deg is not None:
+        engine_spec.exhaust_cam_duration_deg = request.exhaust_cam_duration_deg
+    if request.intake_lift_mm is not None:
+        engine_spec.intake_lift_mm = request.intake_lift_mm
+    if request.exhaust_lift_mm is not None:
+        engine_spec.exhaust_lift_mm = request.exhaust_lift_mm
+    if request.lobe_separation_deg is not None:
+        engine_spec.lobe_separation_deg = request.lobe_separation_deg
     if request.induction_type is not None:
         engine_spec.induction.type = request.induction_type
     if request.boost_psi is not None:
         engine_spec.induction.boost_psi = request.boost_psi
+    if request.compressor_efficiency is not None:
+        engine_spec.compressor_efficiency = request.compressor_efficiency
+    if request.intercooler_effectiveness is not None:
+        engine_spec.intercooler_effectiveness = request.intercooler_effectiveness
     if request.fuel_type is not None:
         engine_spec.fuel.fuel_type = request.fuel_type
     if request.injector_scale is not None:
         engine_spec.fuel.injector_scale = request.injector_scale
     if request.pump_scale is not None:
         engine_spec.fuel.pump_scale = request.pump_scale
+    if request.target_lambda is not None:
+        engine_spec.target_lambda = request.target_lambda
+    if request.ignition_advance_bias_deg is not None:
+        engine_spec.ignition_advance_bias_deg = request.ignition_advance_bias_deg
     if request.exhaust_style is not None:
         engine_spec.exhaust.exhaust_style = request.exhaust_style
+    if request.exhaust_backpressure_factor is not None:
+        engine_spec.exhaust_backpressure_factor = request.exhaust_backpressure_factor
     if request.tune_bias is not None:
         engine_spec.tune_bias = request.tune_bias
     if request.rev_limit_rpm is not None:
         engine_spec.rev_limit_rpm = request.rev_limit_rpm
+    if request.radiator_effectiveness is not None:
+        engine_spec.radiator_effectiveness = request.radiator_effectiveness
+    if request.ambient_temp_c is not None:
+        engine_spec.ambient_temp_c = request.ambient_temp_c
+    if request.altitude_m is not None:
+        engine_spec.altitude_m = request.altitude_m
 
     selections = []
     for selection in build.selections:
